@@ -34,7 +34,7 @@ jobs:
       - name: Prepare web files
         run: |
           mkdir -p www
-          cp index.html app.js sw.js manifest.webmanifest icon.svg icon-192.png icon-512.png www/
+          cp index.html app.js map.js sw.js manifest.webmanifest icon.svg icon-192.png icon-512.png www/
 
       - name: Add Android platform
         run: npx cap add android
