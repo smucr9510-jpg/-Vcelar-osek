@@ -2,7 +2,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'cz.toreno.vcelarosek',
+  appId: 'cz.toreno.vcelarosek2',
   appName: 'Včelař - Osek',
   webDir: 'www',
   bundledWebRuntime: false,
