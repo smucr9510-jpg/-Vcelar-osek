@@ -1,4 +1,4 @@
-78'use strict';
+'use strict';
 const SITE={name:'TORENO, s.r.o., Osek 489',lat:49.7804535,lon:13.5998565};
 const KEY='vcelarOsek.data.v2';
 const $=id=>document.getElementById(id);const today=()=>new Date().toISOString().slice(0,10);const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
