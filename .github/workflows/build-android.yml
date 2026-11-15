@@ -18,7 +18,7 @@ jobs:
       - name: Unpack visual project
         run: |
           mkdir -p /tmp/vcelar
-          unzip -o vcelar-osek-vzhled-prvniho-navrhu-vedle-v7.zip -d /tmp/vcelar
+          unzip -o Vcelar_Osek_verze_4.zip -d /tmp/vcelar
           cp -r /tmp/vcelar/. .
 
       - name: Setup Node
