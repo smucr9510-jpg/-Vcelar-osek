@@ -14,7 +14,7 @@ jobs:
       - name: Unpack corrected project
         run: |
           mkdir -p /tmp/vcelar
-          unzip -o Vcelar_Osek_LPIS_5KM_AKTUALNI.zip -d /tmp/vcelar
+          unzip -o Vcelar_Osek_LPIS_GML_OPRAVA.zip -d /tmp/vcelar
           cp -r /tmp/vcelar/. .
 
       - uses: actions/setup-node@v4
