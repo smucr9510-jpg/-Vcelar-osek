@@ -18,7 +18,7 @@ jobs:
       - name: Unpack visual project
         run: |
           mkdir -p /tmp/vcelar
-          unzip -o Vcelar_Osek_verze_5_ikona_presne_cely_obrazek.zip -d /tmp/vcelar
+          unzip -o vcelar-osek-oprava-hornich-tlacitek-v9.zip -d /tmp/vcelar
           cp -r /tmp/vcelar/. .
 
       - name: Setup Node
