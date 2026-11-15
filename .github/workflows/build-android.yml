@@ -33,7 +33,7 @@ jobs:
         run: |
           mkdir -p www
           cp index.html map.js sw.js manifest.webmanifest icon.svg honeycomb-bg.svg apiary-background.jpg icon-192.png icon-512.png www/
-          npx esbuild app.js --bundle --outfile=www/app.bundle.js --format=iife
+          npx esbuild app.js --bundle --outfile=www/app.bundle.js --format=iife --loader:.geojson=json
 
       - name: Add Android platform
         run: npx cap add android
