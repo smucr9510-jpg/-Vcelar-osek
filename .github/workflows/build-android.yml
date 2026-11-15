@@ -14,7 +14,7 @@ jobs:
       - name: Unpack corrected project
         run: |
           mkdir -p /tmp/vcelar
-          unzip -o VCELAR_OSEK_MAPA_KARTY_POZEMKU.zip -d /tmp/vcelar
+          unzip -o Vcelar_Osek_MAPA_KARTY_POZEMKU.zip -d /tmp/vcelar
           cp -r /tmp/vcelar/. .
 
       - uses: actions/setup-node@v4
