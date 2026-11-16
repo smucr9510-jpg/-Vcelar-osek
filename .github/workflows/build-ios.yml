@@ -1,0 +1,61 @@
+
+name: Build iOS simulator app
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build-ios:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Unpack corrected project
+        run: |
+          mkdir -p /tmp/vcelar
+          unzip -o Vcelar_Osek_STANOVISTE_OPRAVA.zip -d /tmp/vcelar
+          cp -r /tmp/vcelar/. .
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prepare web files
+        run: |
+          mkdir -p www
+          cp index.html map.js sw.js manifest.webmanifest icon.svg honeycomb-bg.svg apiary-background.jpg icon-192.png icon-512.png www/
+          npx esbuild app.js --bundle --outfile=www/app.bundle.js --format=iife --loader:.geojson=json
+
+      - name: Add iOS platform
+        run: npx cap add ios
+
+      - name: Sync iOS
+        run: npx cap sync ios
+
+      - name: Build iOS Simulator
+        run: |
+          xcodebuild \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package app
+        run: |
+          cd build/ios/Build/Products/Debug-iphonesimulator
+          ditto -c -k --sequesterRsrc --keepParent App.app "$GITHUB_WORKSPACE/Vcelar-Osek-iOS-Simulator.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vcelar-osek-ios-simulator
+          path: Vcelar-Osek-iOS-Simulator.zip
+          retention-days: 14
