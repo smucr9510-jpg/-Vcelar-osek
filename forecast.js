@@ -339,16 +339,23 @@ async function loadNdvi() {
     target.replaceChildren($('div', 'Načítám pozemky LPIS a počasí…', 'panel'));
 
     try {
-      const [parcels, weather] = await Promise.all([
+      
+      const [parcels, weather, ndvi] = await Promise.all([
         loadParcels(),
-        loadWeather()
+        loadWeather(),
+        loadNdvi().catch(error => {
+          console.warn('Sentinel-2 NDVI:', error);
+          return null;
+        })
       ]);
 
       const data = {
         updated: new Date().toISOString(),
         parcels,
-        weather
+        weather,
+        ndvi
       };
+
 
       setCache(data);
       render(target, data, false);
