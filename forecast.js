@@ -1,76 +1,72 @@
 
-/* Včelař – Osek
-   Modul orientační předpovědi snůšky
-   Verze 1.0
-*/
-
-(function () {
+/* Včelař – Osek | Orientační předpověď snůšky */
+(() => {
   'use strict';
 
-  const SITE = {
-    name: 'Stanoviště Osek',
-    lat: 49.7804535,
-    lon: 13.5998565
-  };
+  const SITE = { lat: 49.7804535, lon: 13.5998565 };
+  const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
+  const CACHE = 'vcelarOsek.forecast.v2';
 
-  const CACHE_KEY = 'vcelarOsek.forecast.v1';
-  const CROPS_URL = './crops/plodiny_lpis_2026_osek_5km.geojson';
-
-  const CROP_RULES = [
-    { words: ['řepka', 'repka'], name: 'Řepka', months: [4, 5] },
-    { words: ['ovocný', 'sad', 'jabloň', 'třešeň', 'švestka'], name: 'Ovocné stromy', months: [4, 5] },
-    { words: ['akát', 'trnovník'], name: 'Akát', months: [5, 6] },
-    { words: ['jetel', 'vojtěška'], name: 'Jetel a vojtěška', months: [5, 6, 7, 8] },
-    { words: ['svazenka'], name: 'Svazenka', months: [5, 6, 7, 8] },
-    { words: ['hořčice', 'horcice'], name: 'Hořčice', months: [6, 7, 8] },
-    { words: ['slunečnice'], name: 'Slunečnice', months: [7, 8, 9] },
-    { words: ['pohanka'], name: 'Pohanka', months: [7, 8] }
+  const FLOWERING = [
+    { match: /řepka/i, name: 'Řepka', months: [4, 5] },
+    { match: /ovocn|jabloň|třešeň|švestk/i, name: 'Ovocné stromy', months: [4, 5] },
+    { match: /vrba/i, name: 'Vrba', months: [3, 4] },
+    { match: /akát|trnovník/i, name: 'Akát', months: [5, 6] },
+    { match: /jetel|vojtěška/i, name: 'Jetel a vojtěška', months: [5, 6, 7, 8] },
+    { match: /svazenka/i, name: 'Svazenka', months: [5, 6, 7, 8] },
+    { match: /hořčice/i, name: 'Hořčice', months: [6, 7, 8] },
+    { match: /slunečnice/i, name: 'Slunečnice', months: [7, 8, 9] },
+    { match: /pohanka/i, name: 'Pohanka', months: [7, 8] },
+    { match: /lípa/i, name: 'Lípa', months: [6, 7] }
   ];
 
-  function findCrop(name) {
-    const value = String(name || '').toLowerCase();
-    return CROP_RULES.find(rule =>
-      rule.words.some(word => value.includes(word))
-    );
+  const el = (tag, text, cls) => {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (cls) node.className = cls;
+    return node;
+  };
+
+  function getCache() {
+    try {
+      return JSON.parse(localStorage.getItem(CACHE) || 'null');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function setCache(data) {
+    try {
+      localStorage.setItem(CACHE, JSON.stringify(data));
+    } catch (_) {}
   }
 
   async function loadCrops() {
-    const response = await fetch(CROPS_URL);
-    if (!response.ok) throw new Error('Soubor LPIS se nepodařilo načíst.');
+    const response = await fetch(GEOJSON);
+    if (!response.ok) throw new Error('Data LPIS nejsou dostupná.');
+    const geo = await response.json();
+    const groups = new Map();
 
-    const geojson = await response.json();
-    const features = Array.isArray(geojson.features)
-      ? geojson.features
-      : [];
+    (geo.features || []).forEach(feature => {
+      const p = feature.properties || {};
+      const crop = String(p.plodina || '').trim();
+      if (!crop) return;
 
-    const found = {};
-
-    features.forEach(feature => {
-      const properties = feature.properties || {};
-      const cropText = Object.values(properties)
-        .filter(value => typeof value === 'string')
-        .join(' ');
-
-      const rule = findCrop(cropText);
-      if (!rule) return;
-
-      if (!found[rule.name]) {
-        found[rule.name] = {
-          name: rule.name,
-          parcels: 0,
-          months: rule.months
-        };
+      if (!groups.has(crop)) {
+        groups.set(crop, { name: crop, parcels: 0, area: 0 });
       }
 
-      found[rule.name].parcels++;
+      const item = groups.get(crop);
+      item.parcels += 1;
+      item.area += Number(p.deklarovana_vymera_ha || p.dpb_vymera_ha || 0);
     });
 
-    return Object.values(found);
+    return Array.from(groups.values())
+      .sort((a, b) => b.area - a.area);
   }
 
   async function loadWeather() {
     const url = new URL('https://api.open-meteo.com/v1/forecast');
-
     url.search = new URLSearchParams({
       latitude: SITE.lat,
       longitude: SITE.lon,
@@ -80,154 +76,151 @@
     });
 
     const response = await fetch(url);
-    if (!response.ok) throw new Error('Počasí není právě dostupné.');
-
+    if (!response.ok) throw new Error('Počasí není dostupné.');
     return response.json();
   }
 
-  function makeForecast(crops, weather) {
-    const daily = weather.daily || {};
-    const dates = daily.time || [];
+  function render(target, data, offline) {
+    target.replaceChildren();
 
-    const days = dates.map((date, index) => {
-      const temperature = daily.temperature_2m_max?.[index];
-      const rain = daily.precipitation_sum?.[index];
-      const wind = daily.wind_speed_10m_max?.[index];
-
-      let conditions = 'Proměnlivé podmínky';
-      if (temperature >= 15 && rain < 2 && wind < 25) {
-        conditions = 'Příznivé počasí pro let včel';
-      } else if (rain >= 2) {
-        conditions = 'Déšť může omezovat let';
-      } else if (wind >= 25) {
-        conditions = 'Vítr může omezovat let';
-      } else if (temperature < 12) {
-        conditions = 'Chladno – omezený let';
-      }
-
-      return {
-        date,
-        temperature,
-        rain,
-        wind,
-        conditions
-      };
-    });
-
-    const month = new Date().getMonth() + 1;
-    const flowering = crops.filter(crop =>
-      crop.months.includes(month)
+    const panel = el('div', undefined, 'panel');
+    panel.append(
+      el('h2', '🐝 Očekávaná snůška'),
+      el('p', 'Stanoviště Osek · okruh LPIS do 5 km', 'muted'),
+      el('p', offline
+        ? 'Zobrazeny poslední uložené údaje – offline.'
+        : 'Údaje byly právě aktualizovány.')
     );
 
-    return {
-      updated: new Date().toISOString(),
-      site: SITE,
-      crops,
-      flowering,
-      days
-    };
-  }
+    panel.append(el('h3', 'Plodiny v okolí'));
 
-  function saveForecast(data) {
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-    } catch (error) {
-      console.warn('Předpověď se nepodařilo uložit offline.', error);
+    const list = el('div');
+    const month = new Date().getMonth() + 1;
+
+    const flowering = data.crops.filter(crop => {
+      const rule = FLOWERING.find(item => item.match.test(crop.name));
+      return rule && rule.months.includes(month);
+    });
+
+    if (flowering.length) {
+      flowering.forEach(crop => {
+        const row = el('div', undefined, 'item');
+        const info = el('div');
+        info.append(
+          el('b', crop.name),
+          el('div',
+            `${crop.parcels} pozemků · ${crop.area.toFixed(2)} ha`,
+            'muted')
+        );
+        row.append(info);
+        list.append(row);
+      });
+    } else {
+      list.append(el('p',
+        'Pro aktuální měsíc nebyla v evidenci nalezena plodina s nastaveným obdobím kvetení.',
+        'muted'));
     }
-  }
 
-  function getSavedForecast() {
-    try {
-      const saved = localStorage.getItem(CACHE_KEY);
-      return saved ? JSON.parse(saved) : null;
-    } catch (error) {
-      return null;
+    panel.append(list);
+    panel.append(el('h3', 'Počasí na dalších 7 dní'));
+
+    if (data.weather && data.weather.daily) {
+      const daily = data.weather.daily;
+      (daily.time || []).forEach((date, i) => {
+        const temp = daily.temperature_2m_max?.[i];
+        const rain = daily.precipitation_sum?.[i];
+        const wind = daily.wind_speed_10m_max?.[i];
+
+        let status = 'Proměnlivé podmínky';
+        if (temp >= 15 && rain < 2 && wind < 25) {
+          status = 'Příznivější podmínky pro let včel';
+        } else if (rain >= 2) {
+          status = 'Déšť může omezit let';
+        } else if (wind >= 25) {
+          status = 'Silnější vítr může omezit let';
+        } else if (temp < 12) {
+          status = 'Chladno – omezený let';
+        }
+
+        const row = el('div', undefined, 'item');
+        row.append(el('div',
+          `${new Date(date).toLocaleDateString('cs-CZ')} · ${temp ?? '–'} °C · déšť ${rain ?? '–'} mm · vítr ${wind ?? '–'} km/h`));
+        row.append(el('span', status, 'tag'));
+        panel.append(row);
+      });
     }
-  }
 
-  function showForecast(target, data, offline) {
-    if (!target) return;
+    panel.append(
+      el('p',
+        'Poslední aktualizace: ' +
+        new Date(data.updated).toLocaleString('cs-CZ'),
+        'muted'),
+      el('p',
+        'Přehled je orientační. LPIS eviduje plodiny, nikoli skutečné kvetení nebo tvorbu nektaru. Stav je nutné ověřit v terénu.',
+        'muted')
+    );
 
-    const dateText = new Date(data.updated).toLocaleString('cs-CZ');
+    const button = el('button', 'Aktualizovat předpověď', 'btn primary');
+    button.type = 'button';
+    button.addEventListener('click', () => update(target));
+    panel.append(button);
 
-    const cropHtml = data.flowering.length
-      ? data.flowering.map(crop =>
-          `<li>${crop.name} – ${crop.parcels} evidovaných pozemků</li>`
-        ).join('')
-      : '<li>V tomto období nebyla nalezena odpovídající plodina.</li>';
-
-    const daysHtml = data.days.map(day => `
-      <tr>
-        <td>${new Date(day.date).toLocaleDateString('cs-CZ')}</td>
-        <td>${day.temperature ?? '–'} °C</td>
-        <td>${day.rain ?? '–'} mm</td>
-        <td>${day.wind ?? '–'} km/h</td>
-        <td>${day.conditions}</td>
-      </tr>
-    `).join('');
-
-    target.innerHTML = `
-      <section class="forecast-panel">
-        <h2>🐝 Očekávaná včelí snůška</h2>
-        <p><strong>${SITE.name}</strong></p>
-        <p>Aktualizace: ${dateText}</p>
-        <p>${offline ? 'Zobrazená uložená data – offline režim.' : 'Aktuální data.'}</p>
-
-        <h3>Možné zdroje snůšky</h3>
-        <ul>${cropHtml}</ul>
-
-        <h3>Počasí na dalších 7 dní</h3>
-        <div style="overflow-x:auto">
-          <table>
-            <thead>
-              <tr>
-                <th>Den</th><th>Teplota</th><th>Déšť</th>
-                <th>Vítr</th><th>Podmínky</th>
-              </tr>
-            </thead>
-            <tbody>${daysHtml}</tbody>
-          </table>
-        </div>
-
-        <p><small>
-          Jde o orientační přehled. Evidence plodin a počasí
-          sama o sobě nepotvrzuje skutečnou tvorbu nektaru.
-          Rozkvět je nutné ověřit přímo v přírodě.
-        </small></p>
-      </section>
-    `;
+    target.append(panel);
   }
 
   async function update(target) {
+    target.replaceChildren(el('div', 'Načítám plodiny a počasí…', 'panel'));
+
     try {
       const [crops, weather] = await Promise.all([
         loadCrops(),
         loadWeather()
       ]);
 
-      const data = makeForecast(crops, weather);
-      saveForecast(data);
-      showForecast(target, data, false);
+      const data = {
+        updated: new Date().toISOString(),
+        crops,
+        weather
+      };
 
+      setCache(data);
+      render(target, data, false);
       return data;
     } catch (error) {
-      console.warn('Aktualizace předpovědi:', error);
-
-      const saved = getSavedForecast();
+      const saved = getCache();
       if (saved) {
-        showForecast(target, saved, true);
-      } else if (target) {
-        target.textContent =
-          'Předpověď zatím není dostupná. Zkontrolujte připojení k internetu.';
+        render(target, saved, true);
+      } else {
+        target.replaceChildren(
+          el('div',
+            'Předpověď není dostupná. Připojte se k internetu a zkuste aktualizaci znovu.',
+            'notice warn')
+        );
       }
-
       return saved;
     }
   }
 
-  window.VcelarForecast = {
-    update,
-    getSavedForecast
-  };
+  function start() {
+    const forage = document.getElementById('forage');
+    if (!forage || document.getElementById('forecastPanel')) return;
 
+    const target = el('div');
+    target.id = 'forecastPanel';
+    forage.insertBefore(target, forage.firstChild);
+
+    const saved = getCache();
+    if (saved) render(target, saved, true);
+    else target.append(el('div', 'Předpověď se načte při připojení k internetu.', 'notice'));
+
+    update(target);
+  }
+
+  window.VcelarForecast = { update, getCache };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
 })();
