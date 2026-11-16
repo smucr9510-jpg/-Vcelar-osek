@@ -1,4 +1,4 @@
-
+nu
 name: Deploy Vcelar Osek to GitHub Pages
 
 on:
@@ -34,6 +34,35 @@ jobs:
         run: |
           mkdir -p source public
           unzip -o Vcelar_Osek_STANOVISTE_OPRAVA.zip -d source
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("source/app.js")
+          s = p.read_text()
+          start = s.index("$('export').onclick=async()=>")
+          end = s.index("$('importFile').onchange", start)
+          replacement = """$('export').onclick=async()=>{
+            const json=JSON.stringify({app:'Včelař – Osek',version:2,exported:new Date().toISOString(),site:SITE,data:db},null,2);
+            const name='vcelar-osek-zaloha-'+today()+'.json';
+            try{
+              const file=new File([json],name,{type:'application/json'});
+              if(navigator.canShare && navigator.canShare({files:[file]}) && navigator.share){
+                await navigator.share({files:[file],title:'Záloha Včelař – Osek'});
+                $('backupStatus').textContent='Vyberte Uložit do Souborů.';
+              }else{
+                const blob=new Blob([json],{type:'application/json'});
+                const url=URL.createObjectURL(blob);
+                const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+                setTimeout(()=>URL.revokeObjectURL(url),60000);
+                $('backupStatus').textContent='Záloha se stahuje: '+name;
+              }
+            }catch(e){
+              if(e.name==='AbortError') $('backupStatus').textContent='Sdílení zrušeno.';
+              else $('backupStatus').textContent='Export se nepodařil: '+e.message;
+            }
+          };
+          """
+          p.write_text(s[:start] + replacement + s[end:])
+          PY
           cd source
           npm install
           npx esbuild app.js --bundle --outfile=../public/app.bundle.js --platform=browser --format=iife --loader:.geojson=json
