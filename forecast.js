@@ -182,7 +182,53 @@ async function loadNdvi() {
       $('p', offline ? 'Poslední uložená data – offline.' : 'Data aktualizována online.'),
       $('p', 'Aktualizace: ' + new Date(data.updated).toLocaleString('cs-CZ'), 'muted')
     );
+    panel.append($('h3', '🛰️ Vývoj vegetace podle Sentinel-2'));
 
+    const ndviItems = data.ndvi && Array.isArray(data.ndvi.data)
+      ? data.ndvi.data.map(item => ({
+          date: item.interval && item.interval.to,
+          mean: item.outputs?.ndvi?.bands?.B0?.stats?.mean
+        })).filter(item => item.date && Number.isFinite(item.mean))
+      : [];
+
+    if (ndviItems.length) {
+      const latest = ndviItems[ndviItems.length - 1];
+
+      panel.append($('p',
+        'Poslední průměrná hodnota NDVI: ' + latest.mean.toFixed(3),
+        'notice'));
+
+      ndviItems.forEach(item => {
+        const row = $('div', undefined, 'item');
+        const date = new Date(item.date).toLocaleDateString('cs-CZ');
+        const label = $('div',
+          date + ' · NDVI ' + item.mean.toFixed(3));
+
+        const bar = $('div');
+        bar.style.height = '10px';
+        bar.style.width = Math.max(0, Math.min(100, item.mean * 100)) + '%';
+        bar.style.background = '#4b9b55';
+        bar.style.borderRadius = '6px';
+
+        const track = $('div');
+        track.style.width = '100%';
+        track.style.height = '10px';
+        track.style.background = '#e5e9e5';
+        track.style.borderRadius = '6px';
+        track.append(bar);
+
+        row.append(label, track);
+        panel.append(row);
+      });
+
+      panel.append($('p',
+        'NDVI vyjadřuje zelenost a aktivitu vegetace. Nejde přímo o měření nektaru ani snůšky.',
+        'muted'));
+    } else {
+      panel.append($('p',
+        'Družicová data NDVI zatím nejsou dostupná.',
+        'muted'));
+    }
     panel.append($('h3', 'Přehled podle vzdálenosti'));
 
     RINGS.forEach(radius => {
