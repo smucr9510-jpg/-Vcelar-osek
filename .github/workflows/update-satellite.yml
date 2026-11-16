@@ -22,7 +22,7 @@ jobs:
           CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
         
-          run: |
+        run: |
             set +x
             RESPONSE=$(mktemp)
             HTTP_CODE=$(curl -sS -o "$RESPONSE" -w "%{http_code}" \
