@@ -25,10 +25,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare corrected web app
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Prepare web app
         run: |
-          mkdir -p public
-          unzip -o Vcelar_Osek_STANOVISTE_OPRAVA.zip -d public
+          mkdir -p source public
+          unzip -o Vcelar_Osek_STANOVISTE_OPRAVA.zip -d source
+          cd source
+          npm install
+          npx esbuild app.js --bundle --outfile=../public/app.bundle.js --platform=browser --format=iife
+          cd ..
+          cp -a source/. public/
           touch public/.nojekyll
 
       - name: Upload Pages artifact
