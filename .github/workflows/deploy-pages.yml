@@ -68,6 +68,32 @@ jobs:
           npx esbuild app.js --bundle --outfile=../public/app.bundle.js --platform=browser --format=iife --loader:.geojson=json
           cd ..
           cp -a source/. public/
+          
+          cp forecast.js public/forecast.js
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("public/index.html")
+          s = p.read_text()
+          old = '<script src="map.js"></script>'
+          new = old + '<script src="forecast.js"></script>'
+          if old not in s:
+              raise SystemExit("Nenalezeno místo pro vložení forecast.js")
+          p.write_text(s.replace(old, new, 1))
+
+          p = Path("public/sw.js")
+          s = p.read_text()
+          s = s.replace(
+              "vcelar-osek-v10-plodiny-2026",
+              "vcelar-osek-v11-forecast"
+          )
+          old = "'./icon-512.png']"
+          new = "'./icon-512.png','./forecast.js','./crops/plodiny_lpis_2026_osek_5km.geojson']"
+          if old not in s:
+              raise SystemExit("Nenalezen seznam souborů offline cache")
+          p.write_text(s.replace(old, new, 1))
+          PY
+
           touch public/.nojekyll
 
       - name: Upload Pages artifact
