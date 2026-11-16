@@ -1,0 +1,145 @@
+name: Update NDVI around Osek
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 5 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  update-ndvi:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get CDSE access token
+        env:
+          CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
+        run: |
+          set -e
+          RESPONSE=$(mktemp)
+          HTTP_CODE=$(curl -sS -o "$RESPONSE" -w "%{http_code}" \
+            -X POST \
+            "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=client_credentials" \
+            --data-urlencode "client_id=$CLIENT_ID" \
+            --data-urlencode "client_secret=$CLIENT_SECRET")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "CDSE token request failed (HTTP $HTTP_CODE)."
+            jq -r '.error // empty, .error_description // empty' "$RESPONSE"
+            rm -f "$RESPONSE"
+            exit 1
+          fi
+          TOKEN=$(jq -er '.access_token' "$RESPONSE")
+          echo "::add-mask::$TOKEN"
+          echo "CDSE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          rm -f "$RESPONSE"
+
+      - name: Calculate NDVI for 5 km around apiary
+        run: |
+          mkdir -p data
+          python3 - <<'PY'
+          import json, math
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+
+          cx, cy = 399201.25, 5515161.50
+          radius = 5000
+          ring = [
+              [cx + radius * math.cos(2 * math.pi * i / 48),
+               cy + radius * math.sin(2 * math.pi * i / 48)]
+              for i in range(48)
+          ]
+          ring.append(ring[0])
+
+          now = datetime.now(timezone.utc)
+          start = now - timedelta(days=60)
+          evalscript = """//VERSION=3
+          function setup() {
+            return {
+              input: [{
+                bands: ["B04", "B08", "SCL", "dataMask"],
+                units: "REFLECTANCE"
+              }],
+              output: [
+                { id: "ndvi", bands: 1, sampleType: "FLOAT32" },
+                { id: "dataMask", bands: 1 }
+              ]
+            };
+          }
+          function evaluatePixel(s) {
+            let sum = s.B08 + s.B04;
+            let mask = s.dataMask;
+            if ([3, 6, 8, 9, 10, 11].includes(s.SCL) || sum === 0) {
+              mask = 0;
+            }
+            let ndvi = sum === 0 ? 0 : (s.B08 - s.B04) / sum;
+            return { ndvi: [ndvi], dataMask: [mask] };
+          }
+          """
+          request = {
+            "input": {
+              "bounds": {
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+                "properties": {
+                  "crs": "http://www.opengis.net/def/crs/EPSG/0/32633"
+                }
+              },
+              "data": [{
+                "type": "sentinel-2-l2a",
+                "dataFilter": {
+                  "mosaickingOrder": "leastCC",
+                  "maxCloudCoverage": 80
+                }
+              }]
+            },
+            "aggregation": {
+              "timeRange": {
+                "from": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "to": now.strftime("%Y-%m-%dT%H:%M:%SZ")
+              },
+              "aggregationInterval": {"of": "P10D"},
+              "evalscript": evalscript,
+              "resx": 100,
+              "resy": 100
+            }
+          }
+          Path("/tmp/ndvi-request.json").write_text(
+            json.dumps(request), encoding="utf-8"
+          )
+          PY
+          curl -fsS \
+            "https://sh.dataspace.copernicus.eu/statistics/v1" \
+            -H "Authorization: Bearer $CDSE_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            --data-binary @/tmp/ndvi-request.json \
+            -o data/ndvi-latest.json
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+          p = Path("data/ndvi-latest.json")
+          d = json.loads(p.read_text(encoding="utf-8"))
+          if d.get("status") not in ("OK", "PARTIAL") or not d.get("data"):
+            raise SystemExit("NDVI API nevrátila použitelná data.")
+          d["updated"] = datetime.now(timezone.utc).isoformat()
+          d["site"] = "TORENO, Osek"
+          d["radius_m"] = 5000
+          p.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+          print("NDVI intervalů:", len(d["data"]))
+          print("Stav:", d["status"])
+          PY
+
+      - name: Commit NDVI data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/ndvi-latest.json
+          git diff --cached --quiet || git commit -m "Update NDVI data around Osek"
+          git push
