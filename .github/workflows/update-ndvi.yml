@@ -1,3 +1,4 @@
+
 name: Update NDVI around Osek
 
 on:
@@ -31,7 +32,7 @@ jobs:
             --data-urlencode "client_secret=$CLIENT_SECRET")
           if [ "$HTTP_CODE" != "200" ]; then
             echo "CDSE token request failed (HTTP $HTTP_CODE)."
-            jq -r '.error // empty, .error_description // empty' "$RESPONSE"
+            cat "$RESPONSE"
             rm -f "$RESPONSE"
             exit 1
           fi
@@ -59,12 +60,12 @@ jobs:
 
           now = datetime.now(timezone.utc)
           start = now - timedelta(days=60)
+
           evalscript = """//VERSION=3
           function setup() {
             return {
               input: [{
-                bands: ["B04", "B08", "SCL", "dataMask"],
-                units: "REFLECTANCE"
+                bands: ["B04", "B08", "SCL", "dataMask"]
               }],
               output: [
                 { id: "ndvi", bands: 1, sampleType: "FLOAT32" },
@@ -72,20 +73,30 @@ jobs:
               ]
             };
           }
-          function evaluatePixel(s) {
-            let sum = s.B08 + s.B04;
-            let mask = s.dataMask;
-            if ([3, 6, 8, 9, 10, 11].includes(s.SCL) || sum === 0) {
+
+          function evaluatePixel(samples) {
+            let sum = samples.B08 + samples.B04;
+            let ndvi = sum === 0 ? 0 : (samples.B08 - samples.B04) / sum;
+            let mask = samples.dataMask;
+
+            if ([3, 6, 8, 9, 10, 11].includes(samples.SCL) || sum === 0) {
               mask = 0;
             }
-            let ndvi = sum === 0 ? 0 : (s.B08 - s.B04) / sum;
-            return { ndvi: [ndvi], dataMask: [mask] };
+
+            return {
+              ndvi: [ndvi],
+              dataMask: [mask]
+            };
           }
           """
+
           request = {
             "input": {
               "bounds": {
-                "geometry": {"type": "Polygon", "coordinates": [ring]},
+                "geometry": {
+                  "type": "Polygon",
+                  "coordinates": [ring]
+                },
                 "properties": {
                   "crs": "http://www.opengis.net/def/crs/EPSG/0/32633"
                 }
@@ -109,29 +120,47 @@ jobs:
               "resy": 100
             }
           }
+
           Path("/tmp/ndvi-request.json").write_text(
             json.dumps(request), encoding="utf-8"
           )
           PY
-          curl -fsS \
+
+          HTTP_CODE=$(curl -sS \
+            -o data/ndvi-latest.json \
+            -w "%{http_code}" \
             "https://sh.dataspace.copernicus.eu/statistics/v1" \
             -H "Authorization: Bearer $CDSE_TOKEN" \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
-            --data-binary @/tmp/ndvi-request.json \
-            -o data/ndvi-latest.json
+            --data-binary @/tmp/ndvi-request.json)
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "NDVI API error HTTP $HTTP_CODE"
+            cat data/ndvi-latest.json
+            exit 1
+          fi
+
           python3 - <<'PY'
           import json
           from datetime import datetime, timezone
           from pathlib import Path
+
           p = Path("data/ndvi-latest.json")
           d = json.loads(p.read_text(encoding="utf-8"))
-          if d.get("status") not in ("OK", "PARTIAL") or not d.get("data"):
+
+          if d.get("status") != "OK" or not d.get("data"):
             raise SystemExit("NDVI API nevrátila použitelná data.")
+
           d["updated"] = datetime.now(timezone.utc).isoformat()
           d["site"] = "TORENO, Osek"
           d["radius_m"] = 5000
-          p.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+
+          p.write_text(
+            json.dumps(d, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+          )
+
           print("NDVI intervalů:", len(d["data"]))
           print("Stav:", d["status"])
           PY
