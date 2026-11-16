@@ -155,7 +155,23 @@
     if (temp >= 12 && wind < 25) return 'Částečně příznivé podmínky';
     return 'Proměnlivé podmínky';
   }
+async function loadNdvi() {
+  const response = await fetch('./data/ndvi-latest.json', {
+    cache: 'no-store'
+  });
 
+  if (!response.ok) {
+    throw new Error('Data Sentinel-2 nejsou dostupná.');
+  }
+
+  const result = await response.json();
+
+  if (result.status !== 'OK' || !Array.isArray(result.data)) {
+    throw new Error('Data NDVI mají neočekávaný formát.');
+  }
+
+  return result;
+}
   function render(target, data, offline) {
     target.replaceChildren();
     const panel = $('div', undefined, 'panel');
