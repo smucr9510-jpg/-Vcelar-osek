@@ -21,17 +21,30 @@ jobs:
         env:
           CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
-        run: |
-          TOKEN=$(curl -fsS -X POST \
-            "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            --data-urlencode "grant_type=client_credentials" \
-            --data-urlencode "client_id=$CLIENT_ID" \
-            --data-urlencode "client_secret=$CLIENT_SECRET" \
-            | jq -er '.access_token')
+        
+          run: |
+            set +x
+            RESPONSE=$(mktemp)
+            HTTP_CODE=$(curl -sS -o "$RESPONSE" -w "%{http_code}" \
+              -X POST \
+              "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token" \
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              --data-urlencode "grant_type=client_credentials" \
+              --data-urlencode "client_id=$CLIENT_ID" \
+              --data-urlencode "client_secret=$CLIENT_SECRET")
 
-          echo "::add-mask::$TOKEN"
-          echo "CDSE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "CDSE token request failed (HTTP $HTTP_CODE)."
+              jq -r '.error // empty, .error_description // empty' "$RESPONSE"
+              rm -f "$RESPONSE"
+              exit 1
+            fi
+
+            TOKEN=$(jq -er '.access_token' "$RESPONSE")
+            echo "::add-mask::$TOKEN"
+            echo "CDSE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+            rm -f "$RESPONSE"
+
 
       - name: Search Sentinel-2 images around Osek
         run: |
