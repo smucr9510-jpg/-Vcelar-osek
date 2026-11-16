@@ -1,0 +1,71 @@
+
+name: Update Sentinel-2 satellite data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  update-satellite:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get CDSE access token
+        env:
+          CLIENT_ID: ${{ secrets.CDSE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CDSE_CLIENT_SECRET }}
+        run: |
+          TOKEN=$(curl -fsS -X POST \
+            "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=client_credentials" \
+            --data-urlencode "client_id=$CLIENT_ID" \
+            --data-urlencode "client_secret=$CLIENT_SECRET" \
+            | jq -er '.access_token')
+
+          echo "::add-mask::$TOKEN"
+          echo "CDSE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Search Sentinel-2 images around Osek
+        run: |
+          mkdir -p data
+
+          FILTER="Collection/Name eq 'SENTINEL-2' and ContentDate/Start gt 2026-10-01T00:00:00.000Z and OData.CSC.Intersects(area=geography'SRID=4326;POLYGON((13.53 49.735,13.67 49.735,13.67 49.825,13.53 49.825,13.53 49.735))')"
+
+          curl -fsSG \
+            "https://catalogue.dataspace.copernicus.eu/odata/v1/Products" \
+            -H "Authorization: Bearer $CDSE_TOKEN" \
+            --data-urlencode "\$filter=$FILTER" \
+            --data-urlencode "\$orderby=ContentDate/Start desc" \
+            --data-urlencode "\$top=30" \
+            --data-urlencode "\$select=Id,Name,ContentDate,GeoFootprint" \
+            -o data/sentinel2-latest.json
+
+      - name: Save latest satellite catalogue
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("data/sentinel2-latest.json")
+          d = json.loads(p.read_text())
+          d["updated"] = __import__("datetime").datetime.now(
+              __import__("datetime").timezone.utc
+          ).isoformat()
+          p.write_text(json.dumps(d, ensure_ascii=False, indent=2))
+          print("Nalezeno snímků:", len(d.get("value", [])))
+          PY
+
+      - name: Commit updated satellite data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/sentinel2-latest.json
+          git diff --cached --quiet || git commit -m "Update Sentinel-2 satellite catalogue"
+          git push
