@@ -36,7 +36,7 @@ jobs:
           unzip -o Vcelar_Osek_STANOVISTE_OPRAVA.zip -d source
           cd source
           npm install
-          npx esbuild app.js --bundle --outfile=../public/app.bundle.js --platform=browser --format=iife
+          npx esbuild app.js --bundle --outfile=../public/app.bundle.js --platform=browser --format=iife --loader:.geojson=json
           cd ..
           cp -a source/. public/
           touch public/.nojekyll
