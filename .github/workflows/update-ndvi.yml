@@ -125,7 +125,7 @@ jobs:
             json.dumps(request), encoding="utf-8"
           )
           PY
-
+          set +e
           HTTP_CODE=$(curl -sS \
             -o data/ndvi-latest.json \
             -w "%{http_code}" \
@@ -134,7 +134,11 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
             --data-binary @/tmp/ndvi-request.json)
-
+          CURL_EXIT=$?
+          set -e
+          echo "Curl exit: $CURL_EXIT"
+          echo "Odpověď Sentinel Hubu:"
+          cat data/ndvi-latest.json
           if [ "$HTTP_CODE" != "200" ]; then
             echo "NDVI API error HTTP $HTTP_CODE"
             cat data/ndvi-latest.json
