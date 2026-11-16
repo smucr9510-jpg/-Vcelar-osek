@@ -25,10 +25,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare web app
+      - name: Prepare corrected web app
         run: |
           mkdir -p public
-          cp index.html app.js map.js sw.js manifest.webmanifest icon.svg icon-192.png icon-512.png public/
+          unzip -o Vcelar_Osek_STANOVISTE_OPRAVA.zip -d public
           touch public/.nojekyll
 
       - name: Upload Pages artifact
