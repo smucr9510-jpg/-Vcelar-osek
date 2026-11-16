@@ -70,6 +70,8 @@ jobs:
           cp -a source/. public/
           
           cp forecast.js public/forecast.js
+          mkdir -p public/data
+          cp data/ndvi-latest.json public/data/ndvi-latest.json
           python3 - <<'PY'
           from pathlib import Path
 
@@ -88,7 +90,7 @@ jobs:
               "vcelar-osek-v11-forecast"
           )
           old = "'./icon-512.png']"
-          new = "'./icon-512.png','./forecast.js','./crops/plodiny_lpis_2026_osek_5km.geojson']"
+          new = "'./icon-512.png','./forecast.js','./data/ndvi-latest.json','./crops/plodiny_lpis_2026_osek_5km.geojson']"
           if old not in s:
               raise SystemExit("Nenalezen seznam souborů offline cache")
           p.write_text(s.replace(old, new, 1))
