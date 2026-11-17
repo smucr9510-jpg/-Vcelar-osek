@@ -1,4 +1,3 @@
-
 name: Deploy Vcelar Osek to GitHub Pages
 
 on:
@@ -38,6 +37,8 @@ jobs:
           from pathlib import Path
           p = Path("source/app.js")
           s = p.read_text()
+
+          # iOS-friendly backup export
           start = s.index("$('export').onclick=async()=>")
           end = s.index("$('importFile').onchange", start)
           replacement = """$('export').onclick=async()=>{
@@ -61,14 +62,109 @@ jobs:
             }
           };
           """
-          p.write_text(s[:start] + replacement + s[end:])
+          s = s[:start] + replacement + s[end:]
+
+          # LPIS: fetch every page and merge by stable LPIS key, without overwriting
+          # manually completed fields in existing parcel cards.
+          start = s.index("$('getFeatures').onclick=async()=>")
+          end = s.index("$('export').onclick=async()=>", start)
+          replacement = r"""$('getFeatures').onclick=async()=>{
+            let layer=$('wfsLayer').value;
+            if(!layer){wfsStatus('Nejdříve načtěte a vyberte vrstvu.',true);return}
+            if(!navigator.onLine){wfsStatus('Jste offline. Import LPIS není dostupný.',true);return}
+            const button=$('getFeatures');
+            button.disabled=true;
+            try{
+              const lat=SITE.lat,lon=SITE.lon,dy=5000/111320,dx=5000/(111320*Math.cos(lat*Math.PI/180));
+              const u=new URL(endpoint());
+              const pageSize=Math.max(100,Math.min(1000,Number($('wfsLimit').value)||300));
+              const base={
+                service:'WFS',version:'1.1.0',request:'GetFeature',typeName:layer,
+                outputFormat:'application/json',srsName:'EPSG:4326',
+                bbox:[lon-dx,lat-dy,lon+dx,lat+dy].join(',')+',EPSG:4326',
+                maxFeatures:String(pageSize)
+              };
+              let received=0,added=0,updated=0,startIndex=0,total=null;
+              const seen=new Set();
+              for(let page=0;page<100;page++){
+                const params=new URLSearchParams(base);
+                params.set('startIndex',String(startIndex));
+                Object.entries(Object.fromEntries(params)).forEach(([k,v])=>u.searchParams.set(k,v));
+                wfsStatus('Načítám LPIS: dávka '+(page+1)+' · dosud '+received+' prvků…');
+                const r=await fetch(u.toString(),{cache:'no-store'});
+                if(!r.ok)throw Error('HTTP '+r.status);
+                const j=await r.json();
+                const features=j.features||[];
+                if(total===null){
+                  const n=Number(j.numberMatched??j.totalFeatures);
+                  if(Number.isFinite(n)&&n>=0)total=n;
+                }
+                if(!features.length)break;
+                received+=features.length;
+                for(const f of features){
+                  const a=f.properties||{};
+                  const rawId=a.id??a.ID??a.idDpb??a.ID_DPB??a.zkracenyKod??a.KOD_DPB??a.kodDpb??a.KOD_DPB;
+                  const id=rawId==null?'':String(rawId).trim();
+                  const geometryKey=f.geometry?JSON.stringify(f.geometry):'';
+                  const key=id?'lpis:'+id:(geometryKey?'geom:'+geometryKey:'');
+                  if(!key||seen.has(key))continue;
+                  seen.add(key);
+                  const areaRaw=a.vymera??a.VYMERA??a.vymeraHa??a.vymera_ha??'';
+                  let area=Number(areaRaw);
+                  if(Number.isFinite(area)&&area>10000)area=area/10000;
+                  const code=id||'LPIS '+key.slice(-12);
+                  let existing=db.parcels.find(p=>p.sourceKey===key||(id&&String(p.code||'').trim()===id));
+                  const imported={
+                    code,dist:'',
+                    area:Number.isFinite(area)&&area>0?String(area):'',
+                    culture:String(a.kultura??a.KULTURA??a.druhPozemku??''),
+                    status:'LPIS – hranice',
+                    geometry:f.geometry,
+                    sourceKey:key,
+                    attributes:a
+                  };
+                  if(existing){
+                    Object.assign(existing,{
+                      sourceKey:key,
+                      geometry:f.geometry,
+                      attributes:a,
+                      area:existing.area||imported.area,
+                      culture:existing.culture||imported.culture,
+                      status:existing.status||imported.status
+                    });
+                    updated++;
+                  }else{
+                    db.parcels.push({
+                      id:uid(),...imported,crop:'',from:'',to:'',
+                      bee:'Neurčeno',verified:'',
+                      notes:'Import z veřejné LPIS WFS. Plodina a kvetení nejsou potvrzeny.'
+                    });
+                    added++;
+                  }
+                }
+                startIndex+=features.length;
+                if(features.length<pageSize)break;
+                if(total!==null&&startIndex>=total)break;
+              }
+              if(received===0)throw Error('LPIS nevrátilo žádné prvky. Zkontrolujte vybranou vrstvu a oblast.');
+              save();
+              wfsStatus('LPIS načteno: '+received+' prvků ve všech dávkách. Nové: '+added+', aktualizované: '+updated+', celkem v evidenci: '+db.parcels.length+'. Ručně doplněné údaje zůstaly zachovány.');
+            }catch(e){
+              wfsStatus('Načtení LPIS selhalo: '+e.message+'. Dosavadní evidence zůstává v telefonu zachována.',true);
+            }finally{
+              button.disabled=false;
+            }
+          };
+          """
+          s = s[:start] + replacement + s[end:]
+          p.write_text(s)
           PY
           cd source
           npm install
           npx esbuild app.js --bundle --outfile=../public/app.bundle.js --platform=browser --format=iife --loader:.geojson=json
           cd ..
           cp -a source/. public/
-          
+
           cp forecast.js public/forecast.js
           mkdir -p public/data
           cp data/ndvi-latest.json public/data/ndvi-latest.json
