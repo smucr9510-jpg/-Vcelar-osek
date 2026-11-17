@@ -33,6 +33,7 @@ jobs:
         run: |
           mkdir -p source public
           unzip -o Vcelar_Osek_STANOVISTE_OPRAVA.zip -d source
+          cp app.js source/app.js
           python3 - <<'PY'
           from pathlib import Path
           p = Path("source/app.js")
