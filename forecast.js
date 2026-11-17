@@ -309,7 +309,33 @@ async function loadNdvi() {
       );
       panel.append(box);
     });
+    panel.append($('h3', '🍯 Odhad potenciálu snůšky'));
 
+    RINGS.forEach(radius => {
+      const forecast = getPotential(data.parcels, radius);
+      const box = $('div', undefined, 'notice');
+
+      box.append(
+        $('b', 'Okruh do ' + radius + ' km'),
+        $('div', 'Odhadovaný potenciál: ' + forecast.level),
+        $('div', 'Plocha hodnocených plodin: ' +
+          forecast.area.toFixed(1) + ' ha')
+      );
+
+      if (forecast.next) {
+        box.append($('div',
+          'Další plodina podle kalendáře: ' +
+          forecast.next.name + ' · ' +
+          monthName(forecast.next.month)
+        ));
+      }
+
+      panel.append(box);
+    });
+
+    panel.append($('p',
+      'Jde o orientační odhad podle plodin evidovaných v LPIS, nikoli o přímé měření nektaru nebo předpověď výnosu medu.',
+      'muted'));
     panel.append($('h3', 'Všechny evidované plodiny'));
 
     RINGS.forEach(radius => {
