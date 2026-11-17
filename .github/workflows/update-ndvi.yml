@@ -31,142 +31,126 @@ jobs:
             --data-urlencode "client_id=$CLIENT_ID" \
             --data-urlencode "client_secret=$CLIENT_SECRET")
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "CDSE token request failed (HTTP $HTTP_CODE)."
+            echo "CDSE token request failed: HTTP $HTTP_CODE"
             cat "$RESPONSE"
-            rm -f "$RESPONSE"
             exit 1
           fi
           TOKEN=$(jq -er '.access_token' "$RESPONSE")
           echo "::add-mask::$TOKEN"
           echo "CDSE_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          rm -f "$RESPONSE"
 
-      - name: Calculate NDVI for 5 km around apiary
+      - name: Calculate Sentinel-2 NDVI for 1, 2, 3 and 5 km
         run: |
           mkdir -p data
           python3 - <<'PY'
-          import json, math
+          import json, math, os, urllib.request, urllib.error
           from datetime import datetime, timedelta, timezone
           from pathlib import Path
 
+          token = os.environ["CDSE_TOKEN"]
           cx, cy = 399201.25, 5515161.50
-          radius = 5000
-          ring = [
-              [cx + radius * math.cos(2 * math.pi * i / 48),
-               cy + radius * math.sin(2 * math.pi * i / 48)]
-              for i in range(48)
-          ]
-          ring.append(ring[0])
-
           now = datetime.now(timezone.utc)
           start = now - timedelta(days=60)
 
           evalscript = """//VERSION=3
           function setup() {
             return {
-              input: [{
-                bands: ["B04", "B08", "SCL", "dataMask"]
-              }],
+              input: [{bands: ["B04", "B08", "SCL", "dataMask"]}],
               output: [
-                { id: "ndvi", bands: 1, sampleType: "FLOAT32" },
-                { id: "dataMask", bands: 1 }
+                {id: "ndvi", bands: 1, sampleType: "FLOAT32"},
+                {id: "dataMask", bands: 1}
               ]
             };
           }
-
-          function evaluatePixel(samples) {
-            let sum = samples.B08 + samples.B04;
-            let ndvi = sum === 0 ? 0 : (samples.B08 - samples.B04) / sum;
-            let mask = samples.dataMask;
-
-            if ([3, 6, 8, 9, 10, 11].includes(samples.SCL) || sum === 0) {
-              mask = 0;
-            }
-
-            return {
-              ndvi: [ndvi],
-              dataMask: [mask]
-            };
+          function evaluatePixel(s) {
+            let sum = s.B08 + s.B04;
+            let ndvi = sum === 0 ? 0 : (s.B08 - s.B04) / sum;
+            let mask = s.dataMask;
+            if ([3, 6, 8, 9, 10, 11].includes(s.SCL) || sum === 0) mask = 0;
+            return {ndvi: [ndvi], dataMask: [mask]};
           }
           """
 
-          request = {
-            "input": {
-              "bounds": {
-                "geometry": {
-                  "type": "Polygon",
-                  "coordinates": [ring]
+          rings = {}
+          for radius_km in [1, 2, 3, 5]:
+            radius = radius_km * 1000
+            ring = [
+              [cx + radius * math.cos(2 * math.pi * i / 48),
+               cy + radius * math.sin(2 * math.pi * i / 48)]
+              for i in range(48)
+            ]
+            ring.append(ring[0])
+
+            request_data = {
+              "input": {
+                "bounds": {
+                  "geometry": {"type": "Polygon", "coordinates": [ring]},
+                  "properties": {
+                    "crs": "http://www.opengis.net/def/crs/EPSG/0/32633"
+                  }
                 },
-                "properties": {
-                  "crs": "http://www.opengis.net/def/crs/EPSG/0/32633"
-                }
+                "data": [{
+                  "type": "sentinel-2-l2a",
+                  "dataFilter": {
+                    "mosaickingOrder": "leastCC",
+                    "maxCloudCoverage": 80
+                  }
+                }]
               },
-              "data": [{
-                "type": "sentinel-2-l2a",
-                "dataFilter": {
-                  "mosaickingOrder": "leastCC",
-                  "maxCloudCoverage": 80
-                }
-              }]
-            },
-            "aggregation": {
-              "timeRange": {
-                "from": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "to": now.strftime("%Y-%m-%dT%H:%M:%SZ")
-              },
-              "aggregationInterval": {"of": "P10D"},
-              "evalscript": evalscript,
-              "resx": 100,
-              "resy": 100
+              "aggregation": {
+                "timeRange": {
+                  "from": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "to": now.strftime("%Y-%m-%dT%H:%M:%SZ")
+                },
+                "aggregationInterval": {"of": "P10D"},
+                "evalscript": evalscript,
+                "resx": 100,
+                "resy": 100
+              }
             }
+
+            body = json.dumps(request_data).encode("utf-8")
+            req = urllib.request.Request(
+              "https://sh.dataspace.copernicus.eu/statistics/v1",
+              data=body,
+              headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+              },
+              method="POST"
+            )
+
+            try:
+              with urllib.request.urlopen(req, timeout=180) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+              detail = e.read().decode("utf-8", errors="replace")
+              raise SystemExit(
+                f"Sentinel Hub error for {radius_km} km: HTTP {e.code}: {detail}"
+              )
+
+            if result.get("status") != "OK" or not result.get("data"):
+              raise SystemExit(f"Sentinel Hub nevrátil data pro okruh {radius_km} km")
+
+            rings[str(radius_km)] = result["data"]
+            print(f"Okruh {radius_km} km: {len(result['data'])} intervalů")
+
+          output = {
+            "status": "OK",
+            "data": rings["5"],
+            "rings": rings,
+            "updated": now.isoformat(),
+            "site": "TORENO, Osek",
+            "radius_m": 5000,
+            "radii_km": [1, 2, 3, 5]
           }
 
-          Path("/tmp/ndvi-request.json").write_text(
-            json.dumps(request), encoding="utf-8"
-          )
-          PY
-          set +e
-          HTTP_CODE=$(curl -sS \
-            -o data/ndvi-latest.json \
-            -w "%{http_code}" \
-            "https://sh.dataspace.copernicus.eu/statistics/v1" \
-            -H "Authorization: Bearer $CDSE_TOKEN" \
-            -H "Content-Type: application/json" \
-            -H "Accept: application/json" \
-            --data-binary @/tmp/ndvi-request.json)
-          CURL_EXIT=$?
-          set -e
-          echo "Curl exit: $CURL_EXIT"
-          echo "Odpověď Sentinel Hubu:"
-          cat data/ndvi-latest.json
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "NDVI API error HTTP $HTTP_CODE"
-            cat data/ndvi-latest.json
-            exit 1
-          fi
-
-          python3 - <<'PY'
-          import json
-          from datetime import datetime, timezone
-          from pathlib import Path
-
-          p = Path("data/ndvi-latest.json")
-          d = json.loads(p.read_text(encoding="utf-8"))
-
-          if d.get("status") != "OK" or not d.get("data"):
-            raise SystemExit("NDVI API nevrátila použitelná data.")
-
-          d["updated"] = datetime.now(timezone.utc).isoformat()
-          d["site"] = "TORENO, Osek"
-          d["radius_m"] = 5000
-
-          p.write_text(
-            json.dumps(d, ensure_ascii=False, indent=2),
+          Path("data/ndvi-latest.json").write_text(
+            json.dumps(output, ensure_ascii=False, indent=2),
             encoding="utf-8"
           )
-
-          print("NDVI intervalů:", len(d["data"]))
-          print("Stav:", d["status"])
+          print("Uložena data NDVI pro všechny čtyři okruhy.")
           PY
 
       - name: Commit NDVI data
@@ -174,5 +158,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/ndvi-latest.json
-          git diff --cached --quiet || git commit -m "Update NDVI data around Osek"
+          git diff --cached --quiet || git commit -m "Update NDVI rings around Osek"
           git push
