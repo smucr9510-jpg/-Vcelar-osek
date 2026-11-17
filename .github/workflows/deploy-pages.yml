@@ -85,12 +85,15 @@ jobs:
 
           p = Path("public/sw.js")
           s = p.read_text()
-          s = s.replace(
-              "const CACHE='vcelar-osek-v3';",
-              "const CACHE='vcelar-osek-v12-forecast-rings';"
+          import re
+          s, count = re.subn(
+              r"const\s+CACHE\s*=\s*['\"][^'\"]+['\"]\s*;",
+              "const CACHE='vcelar-osek-v12-forecast-rings';",
+              s,
+              count=1
           )
-          if "vcelar-osek-v12-forecast-rings" not in s:
-              raise SystemExit("Nepodařilo se změnit verzi offline mezipaměti.")
+          if count != 1:
+              raise SystemExit("V souboru public/sw.js nebyl nalezen řádek CACHE.")
           old = "'./icon-512.png']"
           new = "'./icon-512.png','./forecast.js','./data/ndvi-latest.json','./crops/plodiny_lpis_2026_osek_5km.geojson']"
           if old not in s:
