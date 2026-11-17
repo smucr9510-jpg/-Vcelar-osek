@@ -201,19 +201,9 @@ jobs:
           new = old + '<script src="forecast.js"></script>'
           if old not in s:
               raise SystemExit("Nenalezeno místo pro vložení forecast.js")
-          s = s.replace(old, new, 1)
-          # Network-first: use the newest published app whenever online,
-          # and retain the cached response as an offline fallback.
-          fetch_handler = "self.addEventListener('fetch',event=>{if(event.request.method!=='GET')return;const url=new URL(event.request.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(event.request).then(response=>{if(response&&response.ok){const copy=response.clone();caches.open(CACHE).then(cache=>cache.put(event.request,copy))}return response}).catch(()=>caches.match(event.request).then(cached=>cached||new Response('Offline – obsah není uložen v mezipaměti.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8'}}))))});"
-          lines = s.splitlines()
-          for i, line in enumerate(lines):
-              if "self.addEventListener('fetch'" in line:
-                  lines[i] = fetch_handler
-                  break
-          else:
-              raise SystemExit("Ve service workeru nebyl nalezen fetch handler.")
-          p.write_text("\n".join(lines) + "\n")
+          p.write_text(s.replace(old, new, 1))
 
+          # Update the service worker itself (not index.html).
           p = Path("public/sw.js")
           s = p.read_text()
           s, count = re.subn(
@@ -228,7 +218,16 @@ jobs:
           new = "'./icon-512.png','./forecast.js','./data/ndvi-latest.json','./crops/plodiny_lpis_2026_osek_5km.geojson']"
           if old not in s:
               raise SystemExit("Nenalezen seznam souborů offline cache")
-          p.write_text(s.replace(old, new, 1))
+          s = s.replace(old, new, 1)
+          fetch_handler = "self.addEventListener('fetch',event=>{if(event.request.method!=='GET')return;const url=new URL(event.request.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(event.request).then(response=>{if(response&&response.ok){const copy=response.clone();caches.open(CACHE).then(cache=>cache.put(event.request,copy))}return response}).catch(()=>caches.match(event.request).then(cached=>cached||new Response('Offline – obsah není uložen v mezipaměti.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8'}}))))});"
+          lines = s.splitlines()
+          for i, line in enumerate(lines):
+              if "self.addEventListener('fetch'" in line:
+                  lines[i] = fetch_handler
+                  break
+          else:
+              raise SystemExit("Ve service workeru nebyl nalezen fetch handler.")
+          p.write_text("\n".join(lines) + "\n")
           PY
 
           touch public/.nojekyll
