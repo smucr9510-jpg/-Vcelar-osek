@@ -22,14 +22,54 @@
     if (!parent) return null;
     panel = document.createElement('div');
     panel.id = 'lpisParcelMapPanel';
-    panel.className = 'panel';
+    panel.className = 'panel lpis-map-compact';
     panel.innerHTML = `
       <h3>Mapa pozemků podle LPIS</h3>
       <p class="muted">Hranice načtených pozemků v okolí stanoviště. Klepnutím na plochu otevřete kartu pozemku.</p>
-      <div id="lpisParcelMap" style="height:min(62vh,560px);min-height:320px;width:100%;border-radius:12px;overflow:hidden;background:#e8eee6"></div>
+      <div id="lpisParcelMap" style="height:min(41vh,373px);min-height:240px;width:100%;border-radius:12px;overflow:hidden;background:#e8eee6"></div>
       <div id="lpisParcelMapStatus" class="notice" aria-live="polite">Připravuji mapu…</div>
-      <div class="small muted">Zelená: trvalé travní porosty · žlutá: orná půda a polní plodiny · růžová: sady a zahrady · modrá: ostatní nebo neurčené kultury</div>`;
+      <div class="lpis-map-legend" aria-label="Legenda mapy">
+        <span><i class="lpis-dot" style="background:#4b9655"></i>TTP</span>
+        <span><i class="lpis-dot" style="background:#d59a24"></i>Orná půda</span>
+        <span><i class="lpis-dot" style="background:#bd6a9b"></i>Sady</span>
+        <span><i class="lpis-dot" style="background:#6688b5"></i>Ostatní</span>
+      </div>`;
     parent.insertBefore(panel, list);
+
+    if (!document.getElementById('lpisMapCompactStyles')) {
+      const style = document.createElement('style');
+      style.id = 'lpisMapCompactStyles';
+      style.textContent = `
+        #lpisParcelMapPanel.lpis-map-compact { padding:12px; }
+        #lpisParcelMapPanel.lpis-map-compact h3 { margin-bottom:6px; }
+        #lpisParcelMapPanel.lpis-map-compact > p { margin:0 0 8px; }
+        #lpisParcelMapPanel .lpis-map-legend {
+          display:flex; flex-wrap:wrap; gap:5px 11px; align-items:center;
+          margin-top:8px; color:#647267; font-size:11px; line-height:1.3;
+        }
+        #lpisParcelMapPanel .lpis-map-legend span { display:inline-flex; align-items:center; gap:4px; }
+        #lpisParcelMapPanel .lpis-dot {
+          display:inline-block; width:8px; height:8px; border-radius:50%;
+        }
+        #lpisParcelMap .leaflet-control-layers {
+          border:1px solid #cbd8ca; border-radius:9px; box-shadow:0 1px 5px #0002;
+          font-size:12px;
+        }
+        #lpisParcelMap .leaflet-control-layers-toggle {
+          width:32px; height:32px; background-size:18px 18px;
+        }
+        #lpisParcelMap .leaflet-control-layers-expanded {
+          padding:7px 9px; max-width:190px;
+        }
+        #lpisParcelMap .leaflet-control-layers label { margin:3px 0; font-size:12px; }
+        #lpisParcelMap .leaflet-control-attribution { font-size:9px; }
+        #lpisParcelMapPanel .notice { margin:7px 0 0; padding:7px 9px; font-size:12px; }
+        @media (max-width:420px) {
+          #lpisParcelMap { min-height:220px !important; }
+          #lpisParcelMapPanel .lpis-map-legend { gap:4px 8px; font-size:10px; }
+        }`;
+      document.head.appendChild(style);
+    }
     return panel;
   }
 
@@ -155,7 +195,7 @@
     }).addTo(map).bindTooltip(`${metres / 1000} km`));
     L.control.layers({ 'OpenStreetMap': osm },
       { 'Hranice pozemků LPIS': parcelLayer, 'Stanoviště': markerLayer },
-      { collapsed: true }).addTo(map);
+      { collapsed: true, position: 'topright' }).addTo(map);
     setTimeout(() => map.invalidateSize(), 250);
     draw(latestParcels);
   }
