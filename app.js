@@ -33,8 +33,413 @@ function renderAll(){renderColonies();renderChecks();renderForage();renderParcel
 function wfsStatus(msg,bad=false){$('wfsStatus').className='notice'+(bad?' bad':'');$('wfsStatus').textContent=msg}
 function endpoint(){return $('wfsUrl').value.trim().replace(/\?+$/,'')}
 $('openCaps').onclick=()=>window.open(endpoint()+'?service=WFS&request=GetCapabilities','_blank');
-$('getCaps').onclick=async()=>{if(!navigator.onLine){wfsStatus('Jste offline. Již uložené pozemky fungují; pro načtení LPIS se připojte k internetu.',true);return}wfsStatus('Načítám seznam vrstev…');try{let u=new URL(endpoint());u.searchParams.set('service','WFS');u.searchParams.set('request','GetCapabilities');let r=await fetch(u,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);let xml=new DOMParser().parseFromString(await r.text(),'text/xml');if(xml.querySelector('parsererror'))throw Error('Neplatná XML odpověď');let names=[...xml.getElementsByTagNameNS('*','FeatureType')].map(n=>({name:n.getElementsByTagNameNS('*','Name')[0]?.textContent,title:n.getElementsByTagNameNS('*','Title')[0]?.textContent})).filter(x=>x.name);$('wfsLayer').innerHTML=names.map(x=>`<option value="${esc(x.name)}">${esc(x.title||x.name)} (${esc(x.name)})</option>`).join('');if(!names.length)throw Error('Služba nevrátila žádné vrstvy');wfsStatus('Spojení navázáno. Dostupných vrstev: '+names.length+'. Vyberte vrstvu a načtěte prvky.')}catch(e){wfsStatus('LPIS se nepodařilo načíst: '+e.message+'. Může jít o omezení CORS služby. Zkuste otevřít GetCapabilities v samostatné kartě; pro spolehlivé napojení bude potřeba proxy server.',true)}};
-$('getFeatures').onclick=async()=>{let layer=$('wfsLayer').value;if(!layer){wfsStatus('Nejdříve načtěte a vyberte vrstvu.',true);return}if(!navigator.onLine){wfsStatus('Jste offline. Import LPIS není dostupný.',true);return}try{let lat=SITE.lat,lon=SITE.lon,dy=5000/111320,dx=5000/(111320*Math.cos(lat*Math.PI/180));let u=new URL(endpoint());let params={service:'WFS',version:'1.1.0',request:'GetFeature',typeName:layer,outputFormat:'application/json',srsName:'EPSG:4326',bbox:[lon-dx,lat-dy,lon+dx,lat+dy].join(',')+',EPSG:4326',maxFeatures:$('wfsLimit').value};Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,v));wfsStatus('Načítám prvky z LPIS…');let r=await fetch(u);if(!r.ok)throw Error('HTTP '+r.status);let j=await r.json(),features=j.features||[],added=0;for(let f of features){let a=f.properties||{},id=a.id||a.ID||a.idDpb||a.ID_DPB||a.zkracenyKod||a.KOD_DPB||'';let key=String(id||JSON.stringify(f.geometry||{}));if(db.parcels.some(p=>p.sourceKey===key))continue;let area=a.vymera??a.VYMERA??a.vymeraHa??'';let n=Number(area);if(Number.isFinite(n)&&n>10000)n=n/10000;db.parcels.push({id:uid(),code:String(id||'LPIS '+(db.parcels.length+1)),dist:'',area:Number.isFinite(n)&&n>0?String(n):'',culture:String(a.kultura||a.KULTURA||a.druhPozemku||''),crop:'',status:'LPIS – hranice',from:'',to:'',bee:'Neurčeno',verified:'',notes:'Import z veřejné LPIS WFS. Plodina a kvetení nejsou potvrzeny.',geometry:f.geometry,sourceKey:key,attributes:a});added++}save();wfsStatus(`LPIS vrátilo ${features.length} prvků; nově uloženo ${added}. Zkontrolujte atributy a doplňte plodinu podle skutečnosti.`)}catch(e){wfsStatus('Načtení prvků selhalo: '+e.message+'. WFS může blokovat CORS nebo používat jiné parametry/CRS. Údaje již uložené v telefonu zůstávají dostupné.',true)}};
+$('getCaps').onclick=async()=>{if(!navigator.onLine){wfsStatus('Jste offline. Již uložené pozemky fungují; pro načtení LPIS se připojte k internetu.',true);return}wfsStatus('Načítám seznam vrstev…');try{let u=new URL(endpoint());u.searchParams.set('service','WFS');u.searchParams.set('request','GetCapabilities');let r=await fetch(u,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);let xml=new DOMParser().parseFromString(await r.text(),'text/xml');if(xml.querySelector('parsererror'))throw Error('Neplatná XML odpověď');let names=[...xml.getElementsByTagNameNS('*','FeatureType')].map(n=>({name:n.getElementsByTagNameNS('*','Name')[0]?.textContent,title:n.getElementsByTagNameNS('*','Title')[0]?.textContent})).filter(x=>x.name);$('wfsLayer').innerHTML=names.map(x=>`<option value="${esc(x.name)}">${esc(x.title||x.name)} (${esc(x.name)})</option>`).join('');if(!names.length)throw Error('Služba nevrátila žádné vrstvy');wfsStatus('Spojení navázáno. Dostupných vrstev: '+names.length+'. Vyberte vrstvu a načtěte prvky.')}catch(e){wfsStatus('LPIS se nepodařilo načíst: '+e.message+'. Může jít o omezení CORS služby. Zkuste otevřít GetCapabilities v samostatné kartě; pro spolehlivé napojení bude potřeba proxy server.',
+
+$('getFeatures').onclick=async()=>{
+  const layer=$('wfsLayer').value;
+  if(!layer){
+    wfsStatus('Nejdříve načtěte a vyberte vrstvu.',true);
+    return;
+  }
+  if(!navigator.onLine){
+    wfsStatus('Jste offline. Import LPIS není dostupný.',true);
+    return;
+  }
+
+  try{
+    const distance=(lat1,lon1,lat2,lon2)=>{
+      const rad=x=>x*Math.PI/180;
+      const h=
+        Math.sin(rad(lat2-lat1)/2)**2+
+        Math.cos(rad(lat1))*Math.cos(rad(lat2))*
+        Math.sin(rad(lon2-lon1)/2)**2;
+      return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
+    };
+
+    const collectCoordinates=(geometry,out=[])=>{
+      if(!geometry)return out;
+      if(geometry.type==='GeometryCollection'){
+        (geometry.geometries||[]).forEach(g=>collectCoordinates(g,out));
+        return out;
+      }
+      const walk=value=>{
+        if(!Array.isArray(value))return;
+        if(value.length>=2&&
+           typeof value[0]==='number'&&
+           typeof value[1]==='number'){
+          out.push(value);
+          return;
+        }
+        value.forEach(walk);
+      };
+      walk(geometry.coordinates);
+      return out;
+    };
+
+    const geometryCenter=geometry=>{
+      const points=collectCoordinates(geometry);
+      if(!points.length)return null;
+      const minLon=Math.min(...points.map(p=>p[0]));
+      const maxLon=Math.max(...points.map(p=>p[0]));
+      const minLat=Math.min(...points.map(p=>p[1]));
+      const maxLat=Math.max(...points.map(p=>p[1]));
+      return [(minLat+maxLat)/2,(minLon+maxLon)/2];
+    };
+
+    const lat=SITE.lat;
+    const lon=SITE.lon;
+    const dy=5000/111320;
+    const dx=5000/(111320*Math.cos(lat*Math.PI/180));
+
+    const u=new URL(endpoint());
+    const params={
+      service:'WFS',
+      version:'1.0.0',
+      request:'GetFeature',
+      typeName:layer,
+      outputFormat:'application/json',
+      srsName:'EPSG:4326',
+      bbox:[
+        lon-dx,
+        lat-dy,
+        lon+dx,
+        lat+dy
+      ].join(',')+',EPSG:4326',
+      maxFeatures:$('wfsLimit').value
+    };
+
+    Object.entries(params).forEach(([k,v])=>{
+      u.searchParams.set(k,v);
+    });
+
+    wfsStatus('Načítám pozemky LPIS v okolí stanoviště…');
+
+    const response=await fetch(u,{cache:'no-store'});
+    if(!response.ok)throw Error('HTTP '+response.status);
+
+    const result=await response.json();
+    if(!Array.isArray(result.features)){
+      throw Error('Služba nevrátila seznam pozemků ve formátu GeoJSON.');
+    }
+
+    let added=0;
+    let inside=0;
+    let duplicates=0;
+    let outside=0;
+    let withoutGeometry=0;
+
+    for(const feature of result.features){
+      const geometry=feature.geometry;
+      const center=geometryCenter(geometry);
+
+      if(!center){
+        withoutGeometry++;
+        continue;
+      }
+
+      const km=distance(
+        SITE.lat,
+        SITE.lon,
+        center[0],
+        center[1]
+      );
+
+      if(km>5){
+        outside++;
+        continue;
+      }
+
+      inside++;
+
+      const a=feature.properties||{};
+
+      const parcelCode=
+        a.idDpb||
+        a.ID_DPB||
+        a.zkracenyKod||
+        a.KOD_DPB||
+        a.kod||
+        a.KOD||
+        feature.id||
+        a.id||
+        a.ID||
+        '';
+
+      const sourceKey=String(
+        parcelCode||JSON.stringify(geometry)
+      );
+
+      if(db.parcels.some(p=>p.sourceKey===sourceKey)){
+        duplicates++;
+        continue;
+      }
+
+      let area=
+        a.vymera??
+        a.VYMERA??
+        a.vymeraHa??
+        a.VYMERA_HA??
+        '';
+
+      let numericArea=Number(area);
+
+      if(Number.isFinite(numericArea)&&numericArea>10000){
+        numericArea=numericArea/10000;
+      }
+
+      const culture=
+        a.kultura||
+        a.KULTURA||
+        a.druhPozemku||
+        a.DRUH_POZEMKU||
+        '';
+
+      db.parcels.push({
+        id:uid(),
+        code:String(parcelCode||'LPIS '+(db.parcels.length+1)),
+        dist:km.toFixed(2),
+        area:Number.isFinite(numericArea)&&numericArea>0
+          ?String(numericArea)
+          :'',
+        culture:String(culture),
+        crop:'',
+        status:'LPIS – hranice',
+        from:'',
+        to:'',
+        bee:'Neurčeno',
+        verified:'',
+        notes:'Import z veřejné LPIS WFS. Vzdálenost je orientační podle středu ohraničujícího obdélníku geometrie. Plodina a kvetení nejsou potvrzeny.',
+        geometry:geometry,
+        sourceKey:sourceKey,
+        attributes:a
+      });
+
+      added++;
+    }
+
+    if(added>0)save();
+
+    wfsStatus(
+      'LPIS načteno: '+result.features.length+
+      ' prvků. V okruhu 5 km: '+inside+
+      ', nově uloženo: '+added+
+      ', duplicit: '+duplicates+
+      ', mimo okruh: '+outside+
+      ', bez geometrie: '+withoutGeometry+
+      '. Vzdálenost je orientační.'
+    );
+
+  }catch(e){
+    wfsStatus(
+      'Načtení LPIS selhalo: '+e.message+
+      '. Zkontrolujte připojení, WFS službu nebo její CORS nastavení. Již uložená data zůstávají zachována.',
+      true
+    );
+  }
+};                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+
+$('getFeatures').onclick=async()=>{
+  const layer=$('wfsLayer').value;
+  if(!layer){
+    wfsStatus('Nejdříve načtěte a vyberte vrstvu.',true);
+    return;
+  }
+  if(!navigator.onLine){
+    wfsStatus('Jste offline. Import LPIS není dostupný.',true);
+    return;
+  }
+
+  try{
+    const distance=(lat1,lon1,lat2,lon2)=>{
+      const rad=x=>x*Math.PI/180;
+      const h=
+        Math.sin(rad(lat2-lat1)/2)**2+
+        Math.cos(rad(lat1))*Math.cos(rad(lat2))*
+        Math.sin(rad(lon2-lon1)/2)**2;
+      return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
+    };
+
+    const collectCoordinates=(geometry,out=[])=>{
+      if(!geometry)return out;
+      if(geometry.type==='GeometryCollection'){
+        (geometry.geometries||[]).forEach(g=>collectCoordinates(g,out));
+        return out;
+      }
+      const walk=value=>{
+        if(!Array.isArray(value))return;
+        if(value.length>=2&&
+           typeof value[0]==='number'&&
+           typeof value[1]==='number'){
+          out.push(value);
+          return;
+        }
+        value.forEach(walk);
+      };
+      walk(geometry.coordinates);
+      return out;
+    };
+
+    const geometryCenter=geometry=>{
+      const points=collectCoordinates(geometry);
+      if(!points.length)return null;
+      const minLon=Math.min(...points.map(p=>p[0]));
+      const maxLon=Math.max(...points.map(p=>p[0]));
+      const minLat=Math.min(...points.map(p=>p[1]));
+      const maxLat=Math.max(...points.map(p=>p[1]));
+      return [(minLat+maxLat)/2,(minLon+maxLon)/2];
+    };
+
+    const lat=SITE.lat;
+    const lon=SITE.lon;
+    const dy=5000/111320;
+    const dx=5000/(111320*Math.cos(lat*Math.PI/180));
+
+    const u=new URL(endpoint());
+    const params={
+      service:'WFS',
+      version:'1.0.0',
+      request:'GetFeature',
+      typeName:layer,
+      outputFormat:'application/json',
+      srsName:'EPSG:4326',
+      bbox:[
+        lon-dx,
+        lat-dy,
+        lon+dx,
+        lat+dy
+      ].join(',')+',EPSG:4326',
+      maxFeatures:$('wfsLimit').value
+    };
+
+    Object.entries(params).forEach(([k,v])=>{
+      u.searchParams.set(k,v);
+    });
+
+    wfsStatus('Načítám pozemky LPIS v okolí stanoviště…');
+
+    const response=await fetch(u,{cache:'no-store'});
+    if(!response.ok)throw Error('HTTP '+response.status);
+
+    const result=await response.json();
+    if(!Array.isArray(result.features)){
+      throw Error('Služba nevrátila seznam pozemků ve formátu GeoJSON.');
+    }
+
+    let added=0;
+    let inside=0;
+    let duplicates=0;
+    let outside=0;
+    let withoutGeometry=0;
+
+    for(const feature of result.features){
+      const geometry=feature.geometry;
+      const center=geometryCenter(geometry);
+
+      if(!center){
+        withoutGeometry++;
+        continue;
+      }
+
+      const km=distance(
+        SITE.lat,
+        SITE.lon,
+        center[0],
+        center[1]
+      );
+
+      if(km>5){
+        outside++;
+        continue;
+      }
+
+      inside++;
+
+      const a=feature.properties||{};
+
+      const parcelCode=
+        a.idDpb||
+        a.ID_DPB||
+        a.zkracenyKod||
+        a.KOD_DPB||
+        a.kod||
+        a.KOD||
+        feature.id||
+        a.id||
+        a.ID||
+        '';
+
+      const sourceKey=String(
+        parcelCode||JSON.stringify(geometry)
+      );
+
+      if(db.parcels.some(p=>p.sourceKey===sourceKey)){
+        duplicates++;
+        continue;
+      }
+
+      let area=
+        a.vymera??
+        a.VYMERA??
+        a.vymeraHa??
+        a.VYMERA_HA??
+        '';
+
+      let numericArea=Number(area);
+
+      if(Number.isFinite(numericArea)&&numericArea>10000){
+        numericArea=numericArea/10000;
+      }
+
+      const culture=
+        a.kultura||
+        a.KULTURA||
+        a.druhPozemku||
+        a.DRUH_POZEMKU||
+        '';
+
+      db.parcels.push({
+        id:uid(),
+        code:String(parcelCode||'LPIS '+(db.parcels.length+1)),
+        dist:km.toFixed(2),
+        area:Number.isFinite(numericArea)&&numericArea>0
+          ?String(numericArea)
+          :'',
+        culture:String(culture),
+        crop:'',
+        status:'LPIS – hranice',
+        from:'',
+        to:'',
+        bee:'Neurčeno',
+        verified:'',
+        notes:'Import z veřejné LPIS WFS. Vzdálenost je orientační podle středu ohraničujícího obdélníku geometrie. Plodina a kvetení nejsou potvrzeny.',
+        geometry:geometry,
+        sourceKey:sourceKey,
+        attributes:a
+      });
+
+      added++;
+    }
+
+    if(added>0)save();
+
+    wfsStatus(
+      'LPIS načteno: '+result.features.length+
+      ' prvků. V okruhu 5 km: '+inside+
+      ', nově uloženo: '+added+
+      ', duplicit: '+duplicates+
+      ', mimo okruh: '+outside+
+      ', bez geometrie: '+withoutGeometry+
+      '. Vzdálenost je orientační.'
+    );
+
+  }catch(e){
+    wfsStatus(
+      'Načtení LPIS selhalo: '+e.message+
+      '. Zkontrolujte připojení, WFS službu nebo její CORS nastavení. Již uložená data zůstávají zachována.',
+      true
+    );
+  }
+};
 $('export').onclick=async()=>{const json=JSON.stringify({app:'Včelař – Osek',version:2,exported:new Date().toISOString(),site:SITE,data:db},null,2);const name='vcelar-osek-zaloha-'+today()+'.json';try{const blob=new Blob([json],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);$('backupStatus').textContent='Záloha se připravuje ke stažení: '+name;}catch(e){$('backupStatus').textContent='Export se nepodařil: '+e.message;}};
 $('importFile').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let obj=JSON.parse(await f.text()),d=obj.data||obj;if(!Array.isArray(d.colonies)||!Array.isArray(d.checks)||!Array.isArray(d.parcels)||!Array.isArray(d.forage))throw Error('Soubor nemá správnou strukturu zálohy.');if(!confirm('Import nahradí současná data v tomto telefonu. Pokračovat?'))return;db=d;save();$('backupStatus').textContent='Záloha byla úspěšně importována.'}catch(err){$('backupStatus').textContent='Import se nezdařil: '+err.message}e.target.value=''};
 $('resetData').onclick=()=>{if(confirm('Opravdu trvale vymazat všechna data aplikace v tomto zařízení? Doporučujeme nejprve exportovat zálohu.')){db=seed();save();$('backupStatus').textContent='Data byla vymazána a obnovena výchozí čtyři včelstva.'}};
