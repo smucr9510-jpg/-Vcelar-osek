@@ -184,41 +184,52 @@ async function loadNdvi() {
     );
     panel.append($('h3', '🛰️ Vývoj vegetace podle Sentinel-2'));
 
-    const ndviItems = data.ndvi && Array.isArray(data.ndvi.data)
-      ? data.ndvi.data.map(item => ({
-          date: item.interval && item.interval.to,
-          mean: item.outputs?.ndvi?.bands?.B0?.stats?.mean
-        })).filter(item => item.date && Number.isFinite(item.mean))
-      : [];
+    const ndviRings = data.ndvi && data.ndvi.rings;
 
-    if (ndviItems.length) {
-      const latest = ndviItems[ndviItems.length - 1];
+    if (ndviRings) {
+      RINGS.forEach(radius => {
+        const items = (ndviRings[String(radius)] || [])
+          .map(item => ({
+            date: item.interval && item.interval.to,
+            mean: item.outputs?.ndvi?.bands?.B0?.stats?.mean
+          }))
+          .filter(item => item.date && Number.isFinite(item.mean));
 
-      panel.append($('p',
-        'Poslední průměrná hodnota NDVI: ' + latest.mean.toFixed(3),
-        'notice'));
+        panel.append($('h3', 'Okruh ' + radius + ' km'));
 
-      ndviItems.forEach(item => {
-        const row = $('div', undefined, 'item');
-        const date = new Date(item.date).toLocaleDateString('cs-CZ');
-        const label = $('div',
-          date + ' · NDVI ' + item.mean.toFixed(3));
+        if (!items.length) {
+          panel.append($('p', 'Data pro tento okruh nejsou dostupná.', 'muted'));
+          return;
+        }
 
-        const bar = $('div');
-        bar.style.height = '10px';
-        bar.style.width = Math.max(0, Math.min(100, item.mean * 100)) + '%';
-        bar.style.background = '#4b9b55';
-        bar.style.borderRadius = '6px';
+        const latest = items[items.length - 1];
 
-        const track = $('div');
-        track.style.width = '100%';
-        track.style.height = '10px';
-        track.style.background = '#e5e9e5';
-        track.style.borderRadius = '6px';
-        track.append(bar);
+        panel.append($('p',
+          'Aktuální NDVI: ' + latest.mean.toFixed(3),
+          'notice'));
 
-        row.append(label, track);
-        panel.append(row);
+        items.forEach(item => {
+          const row = $('div', undefined, 'item');
+          const date = new Date(item.date).toLocaleDateString('cs-CZ');
+          const label = $('div',
+            date + ' · NDVI ' + item.mean.toFixed(3));
+
+          const bar = $('div');
+          bar.style.height = '10px';
+          bar.style.width = Math.max(0, Math.min(100, item.mean * 100)) + '%';
+          bar.style.background = '#4b9b55';
+          bar.style.borderRadius = '6px';
+
+          const track = $('div');
+          track.style.width = '100%';
+          track.style.height = '10px';
+          track.style.background = '#e5e9e5';
+          track.style.borderRadius = '6px';
+          track.append(bar);
+
+          row.append(label, track);
+          panel.append(row);
+        });
       });
 
       panel.append($('p',
@@ -229,6 +240,7 @@ async function loadNdvi() {
         'Družicová data NDVI zatím nejsou dostupná.',
         'muted'));
     }
+
     panel.append($('h3', 'Přehled podle vzdálenosti'));
 
     RINGS.forEach(radius => {
