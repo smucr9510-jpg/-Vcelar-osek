@@ -53,17 +53,35 @@ $('getFeatures').onclick=async()=>{
   try{
     const distance=(lat1,lon1,lat2,lon2)=>{const rad=x=>x*Math.PI/180;const h=Math.sin(rad(lat2-lat1)/2)**2+Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(rad(lon2-lon1)/2)**2;return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h))};
     const coordinates=[];
-    const walk=(value)=>{if(!Array.isArray(value))return;if(value.length>=2&&typeof value[0]==='number'&&typeof value[1]==='number'){coordinates.push(value);return}value.forEach(walk)};
+    const walk=value=>{if(!Array.isArray(value))return;if(value.length>=2&&typeof value[0]==='number'&&typeof value[1]==='number'){coordinates.push(value);return}value.forEach(walk)};
     const geometryCenter=geometry=>{if(!geometry)return null;if(geometry.type==='GeometryCollection'){const all=[];(geometry.geometries||[]).forEach(g=>{const c=geometryCenter(g);if(c)all.push(c)});if(!all.length)return null;return [all.reduce((s,p)=>s+p[0],0)/all.length,all.reduce((s,p)=>s+p[1],0)/all.length]}coordinates.length=0;walk(geometry.coordinates);if(!coordinates.length)return null;const minLon=Math.min(...coordinates.map(p=>p[0])),maxLon=Math.max(...coordinates.map(p=>p[0])),minLat=Math.min(...coordinates.map(p=>p[1])),maxLat=Math.max(...coordinates.map(p=>p[1]));return [(minLat+maxLat)/2,(minLon+maxLon)/2]};
     const lat=SITE.lat,lon=SITE.lon,dy=5000/111320,dx=5000/(111320*Math.cos(lat*Math.PI/180));
-    const u=new URL(endpoint());
-    const params={service:'WFS',version:'1.0.0',request:'GetFeature',typeName:layer,outputFormat:'application/json',srsName:'EPSG:4326',bbox:[lon-dx,lat-dy,lon+dx,lat+dy].join(',')+',EPSG:4326',maxFeatures:$('wfsLimit').value};
-    Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,v));
-    wfsStatus('Načítám pozemky LPIS v okolí stanoviště…');
-    const response=await fetch(u,{cache:'no-store'});if(!response.ok)throw Error('HTTP '+response.status);
-    const result=await response.json();if(!Array.isArray(result.features))throw Error('Služba nevrátila seznam pozemků ve formátu GeoJSON.');
+    const base=new URL(endpoint());
+    const params={service:'WFS',version:'1.0.0',request:'GetFeature',typeName:layer,outputFormat:'application/json',srsName:'EPSG:4326',bbox:[lon-dx,lat-dy,lon+dx,lat+dy].join(',')+',EPSG:4326'};
+    Object.entries(params).forEach(([k,v])=>base.searchParams.set(k,v));
+    const wanted=Math.max(1,Math.min(1000,Number($('wfsLimit').value)||300));
+    const batchSize=200;let offset=0;const features=[];let previousPage='';
+    wfsStatus('Načítám LPIS po dávkách…');
+    while(offset<wanted){
+      const requestUrl=new URL(base);const requested=Math.min(batchSize,wanted-offset);
+      requestUrl.searchParams.set('maxFeatures',String(requested));
+      requestUrl.searchParams.set('startIndex',String(offset));
+      const response=await fetch(requestUrl,{cache:'no-store'});if(!response.ok)throw Error('HTTP '+response.status+' při dávce od '+offset);
+      const result=await response.json();if(!Array.isArray(result.features))throw Error('Služba nevrátila GeoJSON seznam pozemků.');
+      const batch=result.features;
+      if(!batch.length)break;
+      const signature=JSON.stringify(batch.slice(0,2).map(f=>f.id||f.properties||f.geometry));
+      if(offset>0&&signature===previousPage)throw Error('LPIS opakuje stejnou dávku a ignoruje parametr startIndex. Import byl zastaven, aby nevznikaly chybné záznamy.');
+      previousPage=signature;
+      features.push(...batch.slice(0,wanted-features.length));
+      offset+=batch.length;
+      wfsStatus('Načítám LPIS: '+Math.min(features.length,wanted)+' / '+wanted+' prvků…');
+      if(batch.length<requested)break;
+      if(offset>=wanted)break;
+    }
+    if(!features.length)throw Error('LPIS nevrátil žádné prvky. Zkuste jinou vrstvu nebo ověřte WFS službu.');
     let added=0,inside=0,duplicates=0,outside=0,withoutGeometry=0;
-    for(const feature of result.features){
+    for(const feature of features){
       const center=geometryCenter(feature.geometry);if(!center){withoutGeometry++;continue}
       const km=distance(SITE.lat,SITE.lon,center[0],center[1]);if(km>5){outside++;continue}inside++;
       const a=feature.properties||{};
@@ -76,8 +94,8 @@ $('getFeatures').onclick=async()=>{
       db.parcels.push({id:uid(),code:String(parcelCode||'LPIS '+(db.parcels.length+1)),dist:km.toFixed(2),area:Number.isFinite(numericArea)&&numericArea>0?String(numericArea):'',culture:String(culture),crop:'',status:'LPIS – hranice',from:'',to:'',bee:'Neurčeno',verified:'',notes:'Import z veřejné LPIS WFS. Vzdálenost je orientační podle středu ohraničujícího obdélníku geometrie. Plodina a kvetení nejsou potvrzeny.',geometry:feature.geometry,sourceKey,attributes:a});added++;
     }
     if(added>0||duplicates>0)save();
-    wfsStatus('LPIS načteno: '+result.features.length+' prvků. V okruhu 5 km: '+inside+', nově uloženo: '+added+', již evidováno: '+duplicates+', mimo okruh: '+outside+', bez geometrie: '+withoutGeometry+'. Vzdálenost je orientační.');
-  }catch(e){wfsStatus('Načtení LPIS selhalo: '+e.message+'. Zkontrolujte připojení, WFS službu nebo její CORS nastavení. Již uložená data zůstávají zachována.',true)}
+    wfsStatus('LPIS načteno: '+features.length+' prvků v dávkách. V okruhu 5 km: '+inside+', nově uloženo: '+added+', již evidováno: '+duplicates+', mimo okruh: '+outside+', bez geometrie: '+withoutGeometry+'.'+(features.length>=wanted?' Dosažen nastavený limit '+wanted+'.':'')+' Vzdálenost je orientační.');
+  }catch(e){wfsStatus('Načtení LPIS selhalo: '+e.message+'. Již uložená data zůstávají zachována.',true)}
 };
 $('export').onclick=async()=>{const json=JSON.stringify({app:'Včelař – Osek',version:2,exported:new Date().toISOString(),site:SITE,data:db},null,2);const name='vcelar-osek-zaloha-'+today()+'.json';try{const blob=new Blob([json],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);$('backupStatus').textContent='Záloha se připravuje ke stažení: '+name;}catch(e){$('backupStatus').textContent='Export se nepodařil: '+e.message;}};
 $('importFile').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let obj=JSON.parse(await f.text()),d=obj.data||obj;if(!Array.isArray(d.colonies)||!Array.isArray(d.checks)||!Array.isArray(d.parcels)||!Array.isArray(d.forage))throw Error('Soubor nemá správnou strukturu zálohy.');if(!confirm('Import nahradí současná data v tomto telefonu. Pokračovat?'))return;db=d;save();$('backupStatus').textContent='Záloha byla úspěšně importována.'}catch(err){$('backupStatus').textContent='Import se nezdařil: '+err.message}e.target.value=''};
