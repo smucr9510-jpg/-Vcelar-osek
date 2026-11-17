@@ -86,7 +86,7 @@ jobs:
           p = Path("public/sw.js")
           s = p.read_text()
           s = s.replace(
-              "const CACHE='v3';",
+              "const CACHE='vcelar-osek-v3';",
               "const CACHE='vcelar-osek-v12-forecast-rings';"
           )
           if "vcelar-osek-v12-forecast-rings" not in s:
