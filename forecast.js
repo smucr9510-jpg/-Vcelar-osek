@@ -9,18 +9,28 @@
   const RINGS = [1, 2, 3, 5];
 
   const RULES = [
-    { re: /řepka/i, label: 'Řepka', from: 4, to: 5, potential: 'Vysoký' },
-    { re: /jetel luční|jetel \(|jetelotravní/i, label: 'Jetel', from: 6, to: 8, potential: 'Vysoký' },
+    { re: /řepka jarní/i, label: 'Řepka jarní', from: 5, to: 6, potential: 'Vysoký' },
+    { re: /řepka/i, label: 'Řepka ozimá', from: 4, to: 5, potential: 'Vysoký' },
+
     { re: /vojtěška/i, label: 'Vojtěška', from: 6, to: 9, potential: 'Střední až vysoký' },
+    { re: /jetel/i, label: 'Jetel', from: 5, to: 8, potential: 'Střední až vysoký' },
+
     { re: /svazenka/i, label: 'Svazenka', from: 5, to: 9, potential: 'Vysoký' },
     { re: /hořčice|ředkev/i, label: 'Hořčice a ředkev', from: 5, to: 9, potential: 'Střední' },
-    { re: /nektarodárn/i, label: 'Nektarodárná směs', from: 5, to: 9, potential: 'Vysoký' },
-    { re: /bílkovinn|luskoobiln|hrách|sója/i, label: 'Luskovinné plodiny', from: 6, to: 8, potential: 'Proměnlivý' },
-    { re: /travní porost|trávy|trav čeledi/i, label: 'Travní porosty', from: 5, to: 9, potential: 'Nízký až proměnlivý' },
+
+    { re: /sója/i, label: 'Sója', from: 7, to: 8, potential: 'Střední až proměnlivý' },
+    { re: /hrách/i, label: 'Hrách', from: 5, to: 7, potential: 'Nízký až proměnlivý' },
+    { re: /bílkovinn|luskoobiln/i, label: 'Bílkovinné směsi', from: 6, to: 8, potential: 'Proměnlivý' },
+
+    { re: /nektarodárn/i, label: 'Nektarodárná směs', from: 5, to: 9, potential: 'Proměnlivý až vysoký' },
     { re: /topol/i, label: 'Topol', from: 3, to: 4, potential: 'Především pyl' },
-    { re: /pšenice|ječmen|oves|tritikale|kukuřice/i, label: 'Obilniny a kukuřice', from: 6, to: 8, potential: 'Velmi nízký' },
+    { re: /konopí/i, label: 'Konopí', from: 7, to: 9, potential: 'Především pyl' },
+
+    { re: /kukuřice/i, label: 'Kukuřice', from: 7, to: 8, potential: 'Především pyl' },
+    { re: /pšenice|ječmen|oves|tritikale/i, label: 'Obilniny', from: 5, to: 7, potential: 'Velmi nízký' },
     { re: /brambor/i, label: 'Brambory', from: 6, to: 8, potential: 'Nízký až proměnlivý' },
-    { re: /konopí/i, label: 'Konopí', from: 7, to: 9, potential: 'Především pyl' }
+
+    { re: /travní porost|trávy|trav čeledi/i, label: 'Travní porosty', from: 5, to: 9, potential: 'Nízký až proměnlivý' }
   ];
 
   const $ = (tag, text, cls) => {
