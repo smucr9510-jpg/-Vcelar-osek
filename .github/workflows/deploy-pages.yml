@@ -69,40 +69,43 @@ jobs:
           start = s.index("$('getFeatures').onclick=async()=>")
           end = s.index("$('export').onclick=async()=>", start)
           replacement = r"""$('getFeatures').onclick=async()=>{
-            const layer=$('wfsLayer').value;
-            if(!layer){wfsStatus('Nejdříve načtěte a vyberte vrstvu.',true);return}
+            const selectedLayer=$('wfsLayer').value;
+            if(!selectedLayer){wfsStatus('Nejdříve načtěte a vyberte vrstvu.',true);return}
             if(!navigator.onLine){wfsStatus('Jste offline. LPIS import vyžaduje internet.',true);return}
             const button=$('getFeatures');
             button.disabled=true;
+            let stage='příprava požadavku WFS 2.0.0';
             try{
               const lat=SITE.lat,lon=SITE.lon;
               const dy=5000/111320,dx=5000/(111320*Math.cos(lat*Math.PI/180));
               const endpointUrl=new URL(endpoint());
               endpointUrl.search='';
+              const layer=selectedLayer.includes(':')?selectedLayer:'ms:'+selectedLayer;
               const pageSize=Math.max(100,Math.min(1000,Number($('wfsLimit').value)||300));
-              const base={
-                service:'WFS',
-                version:'1.1.0',
-                request:'GetFeature',
-                typeName:layer,
-                outputFormat:'application/json',
-                srsName:'EPSG:4326',
-                bbox:[lon-dx,lat-dy,lon+dx,lat+dy].join(',')+',EPSG:4326',
-                maxFeatures:String(pageSize)
-              };
               let received=0,added=0,updated=0,startIndex=0,total=null;
               const seen=new Set();
               for(let page=0;page<100;page++){
-                // Avoid URLSearchParams(object), which can fail on older iOS Safari.
+                stage='sestavení parametrů WFS 2.0.0';
                 endpointUrl.search='';
-                for(const key of Object.keys(base)){
-                  endpointUrl.searchParams.set(key,String(base[key]));
+                const params={
+                  service:'WFS',version:'2.0.0',request:'GetFeature',
+                  typeNames:layer,outputFormat:'application/json',
+                  srsName:'EPSG:4326',
+                  bbox:[lon-dx,lat-dy,lon+dx,lat+dy,'EPSG:4326'].join(','),
+                  count:String(pageSize),startIndex:String(startIndex)
+                };
+                for(const key of Object.keys(params)){
+                  endpointUrl.searchParams.set(key,String(params[key]));
                 }
-                endpointUrl.searchParams.set('startIndex',String(startIndex));
-                wfsStatus('Načítám LPIS: dávka '+(page+1)+' · dosud '+received+' prvků…');
+                wfsStatus('Načítám LPIS 2.0: dávka '+(page+1)+' · dosud '+received+' prvků…');
+                stage='odeslání požadavku LPIS';
                 const response=await fetch(endpointUrl.href,{cache:'no-store'});
                 if(!response.ok)throw Error('HTTP '+response.status);
+                stage='čtení GeoJSON odpovědi LPIS';
                 const payload=await response.json();
+                if(payload.type==='ExceptionReport'||payload.exceptions){
+                  throw Error('LPIS vrátil chybu: '+JSON.stringify(payload).slice(0,500));
+                }
                 const features=Array.isArray(payload.features)?payload.features:[];
                 if(total===null){
                   const rawTotal=payload.numberMatched??payload.totalFeatures;
@@ -111,27 +114,29 @@ jobs:
                 }
                 if(!features.length)break;
                 received+=features.length;
+                stage='zpracování hranic pozemků';
                 for(const feature of features){
                   const attrs=feature.properties||{};
-                  const rawId=attrs.id??attrs.ID??attrs.idDpb??attrs.ID_DPB??
-                    attrs.zkracenyKod??attrs.KOD_DPB??attrs.kodDpb??feature.id??'';
+                  const rawId=attrs.IdDiluPudnihoBloku??attrs.idDiluPudnihoBloku??
+                    attrs.ID_DPB??attrs.idDpb??attrs.zkracenyKod??attrs.ZKRACENYKOD??
+                    attrs.KOD_DPB??attrs.kodDpb??attrs.id??attrs.ID??feature.id??'';
                   const parcelId=rawId==null?'':String(rawId).trim();
                   const geometryKey=feature.geometry?JSON.stringify(feature.geometry):'';
                   const stableKey=parcelId?'lpis:'+parcelId:(geometryKey?'geom:'+geometryKey:'');
                   if(!stableKey||seen.has(stableKey))continue;
                   seen.add(stableKey);
-
-                  const areaRaw=attrs.vymera??attrs.VYMERA??attrs.vymeraHa??attrs.vymera_ha??'';
+                  const areaRaw=attrs.vymera??attrs.VYMERA??attrs.Vymera??'';
                   let area=Number(areaRaw);
                   if(Number.isFinite(area)&&area>10000)area=area/10000;
                   const importedArea=Number.isFinite(area)&&area>0?String(area):'';
-                  const importedCulture=String(attrs.kultura??attrs.KULTURA??attrs.druhPozemku??'');
+                  const importedCulture=String(attrs.kultura??attrs.KULTURA??attrs.Kultura??'');
                   const existing=db.parcels.find(parcel=>
-                    parcel.sourceKey===stableKey ||
-                    parcel.sourceKey===parcelId ||
-                    parcel.sourceKey==='lpis:'+parcelId ||
-                    (parcelId&&String(parcel.code||'').trim()===parcelId) ||
-                    (parcelId&&String(parcel.attributes?.id??parcel.attributes?.ID??parcel.attributes?.idDpb??parcel.attributes?.ID_DPB??'').trim()===parcelId)
+                    parcel.sourceKey===stableKey||parcel.sourceKey===parcelId||
+                    parcel.sourceKey==='lpis:'+parcelId||
+                    (parcelId&&String(parcel.code||'').trim()===parcelId)||
+                    (parcelId&&String(parcel.attributes?.IdDiluPudnihoBloku??
+                      parcel.attributes?.idDiluPudnihoBloku??parcel.attributes?.idDpb??
+                      parcel.attributes?.ID_DPB??'').trim()===parcelId)
                   );
                   if(existing){
                     existing.sourceKey=stableKey;
@@ -143,21 +148,11 @@ jobs:
                     updated++;
                   }else{
                     db.parcels.push({
-                      id:uid(),
-                      code:parcelId||'LPIS '+stableKey.slice(-12),
-                      dist:'',
-                      area:importedArea,
-                      culture:importedCulture,
-                      crop:'',
-                      status:'LPIS – hranice',
-                      from:'',
-                      to:'',
-                      bee:'Neurčeno',
-                      verified:'',
+                      id:uid(),code:parcelId||'LPIS '+stableKey.slice(-12),
+                      dist:'',area:importedArea,culture:importedCulture,crop:'',
+                      status:'LPIS – hranice',from:'',to:'',bee:'Neurčeno',verified:'',
                       notes:'Import z veřejné LPIS WFS. Plodina a kvetení nejsou potvrzeny.',
-                      geometry:feature.geometry,
-                      sourceKey:stableKey,
-                      attributes:attrs
+                      geometry:feature.geometry,sourceKey:stableKey,attributes:attrs
                     });
                     added++;
                   }
@@ -166,11 +161,15 @@ jobs:
                 if(features.length<pageSize)break;
                 if(total!==null&&startIndex>=total)break;
               }
-              if(received===0)throw Error('LPIS nevrátilo žádné prvky. Zkontrolujte vrstvu a oblast.');
+              if(received===0)throw Error('LPIS nevrátilo žádné prvky pro oblast stanoviště. Zkontrolujte vrstvu a oblast.');
+              stage='ukládání evidence';
               save();
-              wfsStatus('LPIS načteno: '+received+' prvků. Nové: '+added+', aktualizované: '+updated+', celkem v evidenci: '+db.parcels.length+'. Ručně doplněné údaje zůstaly zachovány.');
+              wfsStatus('LPIS 2.0 načteno: '+received+' prvků. Nové: '+added+
+                ', aktualizované: '+updated+', celkem v evidenci: '+db.parcels.length+
+                '. Ručně doplněné údaje zůstaly zachovány.');
             }catch(error){
-              wfsStatus('Načtení LPIS selhalo: '+(error?.message||String(error))+'. Dosavadní evidence zůstává v telefonu zachována.',true);
+              wfsStatus('Chyba při '+stage+': '+(error?.message||String(error))+
+                '. Dosavadní evidence zůstává v telefonu zachována.',true);
             }finally{
               button.disabled=false;
             }
