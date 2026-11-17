@@ -150,7 +150,54 @@
       crops: Array.from(groups.values()).sort((a, b) => b.area - a.area)
     };
   }
+  function getPotential(parcels, radius) {
+    const selected = parcels.filter(p =>
+      p.distance <= radius && p.rule && p.area > 0
+    );
 
+    const weight = potential => {
+      if (/vysoký/i.test(potential) && /proměnlivý/i.test(potential)) return 2.5;
+      if (/vysoký/i.test(potential)) return 3;
+      if (/střední/i.test(potential) && /proměnlivý/i.test(potential)) return 1.7;
+      if (/střední/i.test(potential)) return 2;
+      if (/proměnlivý/i.test(potential)) return 1.4;
+      if (/nízký/i.test(potential)) return 0.5;
+      if (/pyl/i.test(potential)) return 0.3;
+      return 0.5;
+    };
+
+    const area = selected.reduce((sum, p) => sum + p.area, 0);
+    const score = area
+      ? selected.reduce((sum, p) =>
+          sum + p.area * weight(p.rule.potential), 0) / area
+      : 0;
+
+    let level = 'Zatím nelze určit';
+    if (area) {
+      if (score >= 2.4) level = 'Vysoký';
+      else if (score >= 1.7) level = 'Střední';
+      else if (score >= 0.9) level = 'Nižší';
+      else level = 'Velmi nízký';
+    }
+
+    const currentMonth = new Date().getMonth() + 1;
+    const upcoming = selected
+      .map(p => ({
+        name: p.name,
+        month: p.rule.from,
+        distance: p.distance,
+        area: p.area,
+        months: (p.rule.from - currentMonth + 12) % 12
+      }))
+      .sort((a, b) => a.months - b.months || b.area - a.area);
+
+    return {
+      area,
+      score,
+      level,
+      next: upcoming[0] || null
+    };
+  }
   function monthName(month) {
     return ['leden','únor','březen','duben','květen','červen',
       'červenec','srpen','září','říjen','listopad','prosinec'][month - 1];
