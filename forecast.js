@@ -1,495 +1,61 @@
-
-/* Včelař – Osek | Plodiny, kvetení a orientační snůška */
+/* Včelař – Osek | sezónní model kvetení a potenciálu snůšky */
 (() => {
   'use strict';
-
   const SITE = { lat: 49.7804535, lon: 13.5998565 };
   const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
-  const CACHE = 'vcelarOsek.forecast.v3';
+  const CACHE = 'vcelarOsek.forecast.v4';
   const RINGS = [1, 2, 3, 5];
-
+  const MONTHS = ['leden','únor','březen','duben','květen','červen','červenec','srpen','září','říjen','listopad','prosinec'];
   const RULES = [
-    { re: /řepka jarní/i, label: 'Řepka jarní', from: 5, to: 6, potential: 'Vysoký' },
-    { re: /řepka/i, label: 'Řepka ozimá', from: 4, to: 5, potential: 'Vysoký' },
-
-    { re: /vojtěška/i, label: 'Vojtěška', from: 6, to: 9, potential: 'Střední až vysoký' },
-    { re: /jetel/i, label: 'Jetel', from: 5, to: 8, potential: 'Střední až vysoký' },
-
-    { re: /svazenka/i, label: 'Svazenka', from: 5, to: 9, potential: 'Vysoký' },
-    { re: /hořčice|ředkev/i, label: 'Hořčice a ředkev', from: 5, to: 9, potential: 'Střední' },
-
-    { re: /sója/i, label: 'Sója', from: 7, to: 8, potential: 'Střední až proměnlivý' },
-    { re: /hrách/i, label: 'Hrách', from: 5, to: 7, potential: 'Nízký až proměnlivý' },
-    { re: /bílkovinn|luskoobiln/i, label: 'Bílkovinné směsi', from: 6, to: 8, potential: 'Proměnlivý' },
-
-    { re: /nektarodárn/i, label: 'Nektarodárná směs', from: 5, to: 9, potential: 'Proměnlivý až vysoký' },
-    { re: /topol/i, label: 'Topol', from: 3, to: 4, potential: 'Především pyl' },
-    { re: /konopí/i, label: 'Konopí', from: 7, to: 9, potential: 'Především pyl' },
-
-    { re: /kukuřice/i, label: 'Kukuřice', from: 7, to: 8, potential: 'Především pyl' },
-    { re: /pšenice|ječmen|oves|tritikale/i, label: 'Obilniny', from: 5, to: 7, potential: 'Velmi nízký' },
-    { re: /brambor/i, label: 'Brambory', from: 6, to: 8, potential: 'Nízký až proměnlivý' },
-
-    { re: /travní porost|trávy|trav čeledi/i, label: 'Travní porosty', from: 5, to: 9, potential: 'Nízký až proměnlivý' }
+    { re:/řepka jarní/i, label:'Řepka jarní', from:5, to:6, score:3.0, kind:'nektar i pyl' },
+    { re:/řepka/i, label:'Řepka ozimá', from:4, to:5, score:3.0, kind:'nektar i pyl' },
+    { re:/vojtěška/i, label:'Vojtěška', from:6, to:9, score:2.6, kind:'nektar i pyl' },
+    { re:/jetel/i, label:'Jetel', from:5, to:8, score:2.5, kind:'nektar i pyl' },
+    { re:/svazenka/i, label:'Svazenka', from:5, to:9, score:3.0, kind:'nektar i pyl' },
+    { re:/hořčice|ředkev/i, label:'Hořčice a ředkev', from:5, to:9, score:2.0, kind:'nektar i pyl' },
+    { re:/sója/i, label:'Sója', from:7, to:8, score:1.8, kind:'nektar' },
+    { re:/hrách/i, label:'Hrách', from:5, to:7, score:0.9, kind:'nektar i pyl' },
+    { re:/bílkovinn|luskoobiln/i, label:'Bílkovinné směsi', from:6, to:8, score:1.4, kind:'proměnlivý zdroj' },
+    { re:/nektarodárn/i, label:'Nektarodárná směs', from:5, to:9, score:2.2, kind:'nektar i pyl' },
+    { re:/topol/i, label:'Topol', from:3, to:4, score:0.25, kind:'především pyl' },
+    { re:/konopí/i, label:'Konopí', from:7, to:9, score:0.25, kind:'především pyl' },
+    { re:/kukuřice/i, label:'Kukuřice', from:7, to:8, score:0.25, kind:'především pyl' },
+    { re:/pšenice|ječmen|oves|tritikale/i, label:'Obilniny', from:5, to:7, score:0.4, kind:'velmi slabý zdroj' },
+    { re:/brambor/i, label:'Brambory', from:6, to:8, score:0.8, kind:'slabý a proměnlivý zdroj' },
+    { re:/travní porost|trávy|trav čeledi/i, label:'Travní porosty', from:5, to:9, score:0.8, kind:'především pyl' }
   ];
-
-  const $ = (tag, text, cls) => {
-    const n = document.createElement(tag);
-    if (text !== undefined) n.textContent = text;
-    if (cls) n.className = cls;
-    return n;
-  };
-
-  function getCoordinates(geometry) {
-    const result = [];
-    if (!geometry) return result;
-    const walk = value => {
-      if (!Array.isArray(value)) return;
-      if (typeof value[0] === 'number' && typeof value[1] === 'number') {
-        result.push([value[0], value[1]]);
-      } else {
-        value.forEach(walk);
-      }
-    };
-    walk(geometry.coordinates);
-    return result;
+  const $ = (tag, text, cls) => { const n=document.createElement(tag); if(text!==undefined)n.textContent=text; if(cls)n.className=cls; return n; };
+  const monthName = m => MONTHS[m-1];
+  function coords(g){const a=[];const walk=x=>{if(!Array.isArray(x))return;if(typeof x[0]==='number'&&typeof x[1]==='number')a.push(x);else x.forEach(walk);};if(g)walk(g.coordinates);return a;}
+  function dist(a,b,c,d){const r=x=>x*Math.PI/180;const h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));}
+  function rule(name){return RULES.find(x=>x.re.test(name))||null;}
+  async function getParcels(){const r=await fetch(GEOJSON);if(!r.ok)throw Error('GeoJSON LPIS není dostupný');const j=await r.json();return (j.features||[]).flatMap(f=>{const p=f.properties||{},name=String(p.plodina||'Plodina neuvedena').trim(),pts=coords(f.geometry),rr=rule(name);if(!pts.length)return[];const lon=pts.reduce((s,x)=>s+x[0],0)/pts.length,lat=pts.reduce((s,x)=>s+x[1],0)/pts.length,distance=dist(SITE.lat,SITE.lon,lat,lon),area=Number(p.deklarovana_vymera_ha||p.dpb_vymera_ha||0);return distance<=5.15?[{name,distance,area,rule:rr}]:[];});}
+  async function getWeather(){const u=new URL('https://api.open-meteo.com/v1/forecast');u.search=new URLSearchParams({latitude:SITE.lat,longitude:SITE.lon,daily:'temperature_2m_max,precipitation_sum,wind_speed_10m_max',forecast_days:'7',timezone:'Europe/Prague'});const r=await fetch(u);if(!r.ok)throw Error('Počasí není dostupné');return r.json();}
+  async function getNdvi(){const r=await fetch('./data/ndvi-latest.json',{cache:'no-store'});if(!r.ok)throw Error('NDVI není dostupné');const j=await r.json();if(j.status!=='OK'||!j.rings)throw Error('Neplatný formát NDVI');return j;}
+  function cached(){try{return JSON.parse(localStorage.getItem(CACHE)||'null')}catch(_){return null;}}
+  function save(x){try{localStorage.setItem(CACHE,JSON.stringify(x));}catch(_){}}
+  function monthlyModel(parcels,radius){
+    const rows=parcels.filter(p=>p.distance<=radius&&p.rule&&p.area>0);
+    const byCrop=new Map();
+    rows.forEach(p=>{const k=p.rule.label;if(!byCrop.has(k))byCrop.set(k,{name:k,area:0,parcels:0,nearest:p.distance,rule:p.rule});const c=byCrop.get(k);c.area+=p.area;c.parcels++;c.nearest=Math.min(c.nearest,p.distance);});
+    const crops=[...byCrop.values()], active=(r,m)=>r.from<=r.to?m>=r.from&&m<=r.to:m>=r.from||m<=r.to;
+    const months=MONTHS.map((_,i)=>{const m=i+1,list=crops.filter(c=>active(c.rule,m));const area=list.reduce((s,c)=>s+c.area,0),weighted=list.reduce((s,c)=>s+c.area*c.rule.score,0);return{month:m,area,score:area?weighted/area:0,crops:list};});
+    const now=new Date().getMonth()+1,cur=months[now-1],next=Array.from({length:11},(_,i)=>months[(now+i)%12]).find(m=>m.area>0),peak=months.reduce((a,b)=>b.score>a.score?b:a,months[0]);
+    const level=s=>!s?'Bez evidované plodiny':s>=2.5?'Vysoký':s>=1.8?'Střední':s>=1?'Nižší':'Velmi nízký';
+    return{totalArea:rows.reduce((s,p)=>s+p.area,0),cropCount:crops.length,current:cur,peak,next,level};
   }
-
-  function distanceKm(lat1, lon1, lat2, lon2) {
-    const rad = x => x * Math.PI / 180;
-    const a = Math.sin(rad(lat2 - lat1) / 2) ** 2 +
-      Math.cos(rad(lat1)) * Math.cos(rad(lat2)) *
-      Math.sin(rad(lon2 - lon1) / 2) ** 2;
-    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  function ndviInfo(data,radius){const a=data?.rings?.[String(radius)]||[];const vals=a.map(x=>({date:x.interval?.to,mean:x.outputs?.ndvi?.bands?.B0?.stats?.mean})).filter(x=>x.date&&Number.isFinite(x.mean));if(!vals.length)return null;const last=vals[vals.length-1],prev=vals.length>1?vals[vals.length-2]:null;return{...last,change:prev?last.mean-prev.mean:null};}
+  function flightStatus(w){const d=w?.daily;if(!d?.time?.length)return'Počasí není dostupné';const t=d.temperature_2m_max?.[0],rain=d.precipitation_sum?.[0],wind=d.wind_speed_10m_max?.[0];if(t==null||rain==null||wind==null)return'Neúplné údaje';if(t<10)return'Chladno – omezený let';if(rain>=2)return'Déšť může omezit let';if(wind>=30)return'Silný vítr';if(t>=15&&rain<1&&wind<20)return'Příznivé podmínky pro let';return'Proměnlivé podmínky';}
+  function render(target,data,offline){target.replaceChildren();const panel=$('div',undefined,'panel');panel.append($('h2','🐝 Sezónní prognóza pastvy a snůšky'),$('p','Stanoviště Osek · LPIS do 5 km','muted'),$('p',offline?'Poslední uložená data – offline.':'Aktualizováno: '+new Date(data.updated).toLocaleString('cs-CZ'),'muted'));
+    panel.append($('h3','🍯 Měsíční potenciál podle plodin LPIS'));
+    RINGS.forEach(radius=>{const m=monthlyModel(data.parcels,radius),box=$('div',undefined,'notice');box.append($('b','Okruh do '+radius+' km'),$('div','Aktuální měsíc ('+monthName(m.current.month)+'): '+m.level(m.current.score)),$('div','Plocha evidovaných plodin s kalendářním kvetením nyní: '+m.current.area.toFixed(1)+' ha'),$('div','Sezónní maximum: '+monthName(m.peak.month)+' · '+m.level(m.peak.score)+' · '+m.peak.area.toFixed(1)+' ha v květu'));if(m.next){const n=m.next.crops.slice().sort((a,b)=>b.area-a.area)[0];box.append($('div','Nejbližší očekávané kvetení: '+n.name+' · '+monthName(m.next.month)+' · '+m.next.area.toFixed(1)+' ha celkem'));}panel.append(box);});
+    panel.append($('p','Skóre vyjadřuje relativní potenciál evidovaných plodin v období kvetení. Nejde o měření nektaru ani předpověď množství medu. Plodina v LPIS nemusí být skutečně vysetá nebo právě kvést.','muted'));
+    panel.append($('h3','🛰️ Sentinel‑2 – vývoj vegetace'));RINGS.forEach(radius=>{const n=ndviInfo(data.ndvi,radius);panel.append($('div',n?'Okruh '+radius+' km · NDVI '+n.mean.toFixed(3)+(n.change==null?'':' · změna '+(n.change>0?'+':'')+n.change.toFixed(3))+' · '+new Date(n.date).toLocaleDateString('cs-CZ'):'Okruh '+radius+' km · NDVI není dostupné','item'));});panel.append($('p','NDVI ukazuje zelenost vegetace v celém okruhu. Je doplňkovým ukazatelem stavu porostů, nikoli přímým ukazatelem kvetení nebo nektaru.','muted'));
+    panel.append($('h3','🌦️ Podmínky letu včel – následujících 7 dní'),$('p',flightStatus(data.weather),'notice'));const d=data.weather?.daily;if(d?.time)(d.time||[]).forEach((date,i)=>panel.append($('div',new Date(date).toLocaleDateString('cs-CZ')+' · '+(d.temperature_2m_max?.[i]??'–')+' °C · déšť '+(d.precipitation_sum?.[i]??'–')+' mm · vítr '+(d.wind_speed_10m_max?.[i]??'–')+' km/h','item')));
+    panel.append($('h3','Přehled plodin podle vzdálenosti'));RINGS.forEach(radius=>{const a=data.parcels.filter(p=>p.distance<=radius),area=a.reduce((s,p)=>s+p.area,0);panel.append($('div','Do '+radius+' km · '+a.length+' pozemkových záznamů · '+area.toFixed(1)+' ha','item'));});
+    const btn=$('button','Aktualizovat prognózu','btn primary');btn.type='button';btn.addEventListener('click',()=>update(target));panel.append(btn);target.append(panel);
   }
-
-  function getRule(name) {
-    return RULES.find(rule => rule.re.test(name)) || null;
-  }
-
-  async function loadParcels() {
-    const response = await fetch(GEOJSON);
-    if (!response.ok) throw new Error('Data LPIS nejsou dostupná.');
-    const geo = await response.json();
-    const parcels = [];
-
-    (geo.features || []).forEach(feature => {
-      const p = feature.properties || {};
-      const name = String(p.plodina || 'Plodina neuvedena').trim();
-      const points = getCoordinates(feature.geometry);
-      if (!points.length) return;
-
-      const lon = points.reduce((s, x) => s + x[0], 0) / points.length;
-      const lat = points.reduce((s, x) => s + x[1], 0) / points.length;
-      const distance = distanceKm(SITE.lat, SITE.lon, lat, lon);
-
-      if (distance > 5.15) return;
-
-      parcels.push({
-        name,
-        distance,
-        area: Number(p.deklarovana_vymera_ha || p.dpb_vymera_ha || 0),
-        rule: getRule(name)
-      });
-    });
-
-    return parcels;
-  }
-
-  async function loadWeather() {
-    const url = new URL('https://api.open-meteo.com/v1/forecast');
-    url.search = new URLSearchParams({
-      latitude: SITE.lat,
-      longitude: SITE.lon,
-      daily: 'temperature_2m_max,precipitation_sum,wind_speed_10m_max',
-      forecast_days: '7',
-      timezone: 'Europe/Prague'
-    });
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('Počasí není dostupné.');
-    return response.json();
-  }
-
-  function getCache() {
-    try {
-      return JSON.parse(localStorage.getItem(CACHE) || 'null');
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function setCache(data) {
-    try {
-      localStorage.setItem(CACHE, JSON.stringify(data));
-    } catch (_) {}
-  }
-
-  function summarize(parcels, radius) {
-    const selected = parcels.filter(p => p.distance <= radius);
-    const groups = new Map();
-
-    selected.forEach(p => {
-      if (!groups.has(p.name)) {
-        groups.set(p.name, {
-          name: p.name,
-          parcels: 0,
-          area: 0,
-          nearest: p.distance,
-          rule: p.rule
-        });
-      }
-      const item = groups.get(p.name);
-      item.parcels++;
-      item.area += p.area;
-      item.nearest = Math.min(item.nearest, p.distance);
-    });
-
-    return {
-      count: selected.length,
-      area: selected.reduce((s, p) => s + p.area, 0),
-      crops: Array.from(groups.values()).sort((a, b) => b.area - a.area)
-    };
-  }
-  function getPotential(parcels, radius) {
-    const selected = parcels.filter(p =>
-      p.distance <= radius && p.rule && p.area > 0
-    );
-
-    const weight = potential => {
-      if (/vysoký/i.test(potential) && /proměnlivý/i.test(potential)) return 2.5;
-      if (/vysoký/i.test(potential)) return 3;
-      if (/střední/i.test(potential) && /proměnlivý/i.test(potential)) return 1.7;
-      if (/střední/i.test(potential)) return 2;
-      if (/proměnlivý/i.test(potential)) return 1.4;
-      if (/nízký/i.test(potential)) return 0.5;
-      if (/pyl/i.test(potential)) return 0.3;
-      return 0.5;
-    };
-
-    const area = selected.reduce((sum, p) => sum + p.area, 0);
-    const score = area
-      ? selected.reduce((sum, p) =>
-          sum + p.area * weight(p.rule.potential), 0) / area
-      : 0;
-
-    let level = 'Zatím nelze určit';
-    if (area) {
-      if (score >= 2.4) level = 'Vysoký';
-      else if (score >= 1.7) level = 'Střední';
-      else if (score >= 0.9) level = 'Nižší';
-      else level = 'Velmi nízký';
-    }
-
-    const currentMonth = new Date().getMonth() + 1;
-    const upcoming = selected
-      .map(p => ({
-        name: p.name,
-        month: p.rule.from,
-        distance: p.distance,
-        area: p.area,
-        months: (p.rule.from - currentMonth + 12) % 12
-      }))
-      .sort((a, b) => a.months - b.months || b.area - a.area);
-
-    return {
-      area,
-      score,
-      level,
-      next: upcoming[0] || null
-    };
-  }
-  function monthName(month) {
-    return ['leden','únor','březen','duben','květen','červen',
-      'červenec','srpen','září','říjen','listopad','prosinec'][month - 1];
-  }
-
-  function weatherStatus(temp, rain, wind) {
-    if (temp == null || rain == null || wind == null) return 'Neúplné údaje';
-    if (temp < 10) return 'Chladno – omezený let';
-    if (rain >= 2) return 'Déšť může omezit let';
-    if (wind >= 30) return 'Silný vítr';
-    if (temp >= 15 && rain < 1 && wind < 20) return 'Příznivé podmínky pro let';
-    if (temp >= 12 && wind < 25) return 'Částečně příznivé podmínky';
-    return 'Proměnlivé podmínky';
-  }
-async function loadNdvi() {
-  const response = await fetch('./data/ndvi-latest.json', {
-    cache: 'no-store'
-  });
-
-  if (!response.ok) {
-    throw new Error('Data Sentinel-2 nejsou dostupná.');
-  }
-
-  const result = await response.json();
-
-  if (result.status !== 'OK' || !Array.isArray(result.data)) {
-    throw new Error('Data NDVI mají neočekávaný formát.');
-  }
-
-  return result;
-}
-  function render(target, data, offline) {
-    target.replaceChildren();
-    const panel = $('div', undefined, 'panel');
-
-    panel.append(
-      $('h2', '🐝 Očekávaná snůška a plodiny'),
-      $('p', 'Stanoviště Osek · LPIS do 5 km', 'muted'),
-      $('p', offline ? 'Poslední uložená data – offline.' : 'Data aktualizována online.'),
-      $('p', 'Aktualizace: ' + new Date(data.updated).toLocaleString('cs-CZ'), 'muted')
-    );
-    panel.append($('h3', '🛰️ Vývoj vegetace podle Sentinel-2'));
-
-    const ndviRings = data.ndvi && data.ndvi.rings;
-
-    if (ndviRings) {
-      RINGS.forEach(radius => {
-        const items = (ndviRings[String(radius)] || [])
-          .map(item => ({
-            date: item.interval && item.interval.to,
-            mean: item.outputs?.ndvi?.bands?.B0?.stats?.mean
-          }))
-          .filter(item => item.date && Number.isFinite(item.mean));
-
-        panel.append($('h3', 'Okruh ' + radius + ' km'));
-
-        if (!items.length) {
-          panel.append($('p', 'Data pro tento okruh nejsou dostupná.', 'muted'));
-          return;
-        }
-
-        const latest = items[items.length - 1];
-
-        panel.append($('p',
-          'Aktuální NDVI: ' + latest.mean.toFixed(3),
-          'notice'));
-
-        items.forEach(item => {
-          const row = $('div', undefined, 'item');
-          const date = new Date(item.date).toLocaleDateString('cs-CZ');
-          const label = $('div',
-            date + ' · NDVI ' + item.mean.toFixed(3));
-
-          const bar = $('div');
-          bar.style.height = '10px';
-          bar.style.width = Math.max(0, Math.min(100, item.mean * 100)) + '%';
-          bar.style.background = '#4b9b55';
-          bar.style.borderRadius = '6px';
-
-          const track = $('div');
-          track.style.width = '100%';
-          track.style.height = '10px';
-          track.style.background = '#e5e9e5';
-          track.style.borderRadius = '6px';
-          track.append(bar);
-
-          row.append(label, track);
-          panel.append(row);
-        });
-      });
-
-      panel.append($('p',
-        'NDVI vyjadřuje zelenost a aktivitu vegetace. Nejde přímo o měření nektaru ani snůšky.',
-        'muted'));
-    } else {
-      panel.append($('p',
-        'Družicová data NDVI zatím nejsou dostupná.',
-        'muted'));
-    }
-
-    panel.append($('h3', 'Přehled podle vzdálenosti'));
-
-    RINGS.forEach(radius => {
-      const s = summarize(data.parcels, radius);
-      const box = $('div', undefined, 'notice');
-      box.append(
-        $('b', 'Okruh do ' + radius + ' km'),
-        $('div', `${s.count} pozemkových záznamů · ${s.area.toFixed(1)} ha`)
-      );
-      panel.append(box);
-    });
-    panel.append($('h3', '🍯 Odhad potenciálu snůšky'));
-
-    RINGS.forEach(radius => {
-      const forecast = getPotential(data.parcels, radius);
-      const box = $('div', undefined, 'notice');
-
-      box.append(
-        $('b', 'Okruh do ' + radius + ' km'),
-        $('div', 'Odhadovaný potenciál: ' + forecast.level),
-        $('div', 'Plocha hodnocených plodin: ' +
-          forecast.area.toFixed(1) + ' ha')
-      );
-
-      if (forecast.next) {
-        box.append($('div',
-          'Další plodina podle kalendáře: ' +
-          forecast.next.name + ' · ' +
-          monthName(forecast.next.month)
-        ));
-      }
-
-      panel.append(box);
-    });
-
-    panel.append($('p',
-      'Jde o orientační odhad podle plodin evidovaných v LPIS, nikoli o přímé měření nektaru nebo předpověď výnosu medu.',
-      'muted'));
-    panel.append($('h3', 'Všechny evidované plodiny'));
-
-    RINGS.forEach(radius => {
-      const s = summarize(data.parcels, radius);
-      const section = $('details');
-      section.open = radius === 5;
-      section.append($('summary', `Do ${radius} km · ${s.crops.length} druhů plodin`));
-
-      if (!s.crops.length) {
-        section.append($('p', 'V tomto okruhu nebyly nalezeny záznamy.', 'muted'));
-      }
-
-      s.crops.forEach(crop => {
-        const row = $('div', undefined, 'item');
-        const info = $('div');
-        info.append(
-          $('b', crop.name),
-          $('div', `${crop.parcels} záznamů · ${crop.area.toFixed(2)} ha · nejbližší střed ${crop.nearest.toFixed(1)} km`, 'muted')
-        );
-
-        if (crop.rule) {
-          info.append($('div',
-            `Očekávané kvetení: ${monthName(crop.rule.from)}–${monthName(crop.rule.to)} · potenciál: ${crop.rule.potential}`,
-            'small'));
-        } else {
-          info.append($('div', 'Termín kvetení a potenciál nejsou určeny.', 'small'));
-        }
-
-        row.append(info);
-        section.append(row);
-      });
-
-      panel.append(section);
-    });
-
-    panel.append($('h3', 'Co může kvést nyní'));
-    const month = new Date().getMonth() + 1;
-    const current = new Map();
-
-    data.parcels.forEach(p => {
-      if (!p.rule || month < p.rule.from || month > p.rule.to) return;
-      if (!current.has(p.name)) current.set(p.name, { count: 0, area: 0, rule: p.rule });
-      const item = current.get(p.name);
-      item.count++;
-      item.area += p.area;
-    });
-
-    if (!current.size) {
-      panel.append($('p',
-        'Podle orientačního kalendáře není nyní v evidovaných plodinách hlavní období kvetení. Rostliny mimo LPIS mohou kvést i nyní.',
-        'muted'));
-    } else {
-      current.forEach((item, name) => {
-        panel.append($('div',
-          `${name} · ${item.count} záznamů · ${item.area.toFixed(1)} ha · potenciál ${item.rule.potential}`,
-          'item'));
-      });
-    }
-
-    panel.append($('h3', 'Počasí na dalších 7 dní'));
-    const daily = data.weather && data.weather.daily;
-
-    if (daily) {
-      (daily.time || []).forEach((date, i) => {
-        const temp = daily.temperature_2m_max?.[i];
-        const rain = daily.precipitation_sum?.[i];
-        const wind = daily.wind_speed_10m_max?.[i];
-        const row = $('div', undefined, 'item');
-
-        row.append($('div',
-          `${new Date(date).toLocaleDateString('cs-CZ')} · ${temp ?? '–'} °C · déšť ${rain ?? '–'} mm · vítr ${wind ?? '–'} km/h`
-        ));
-        row.append($('span', weatherStatus(temp, rain, wind), 'tag'));
-        panel.append(row);
-      });
-    }
-
-    panel.append(
-      $('p',
-        'Období kvetení je orientační kalendář pro západní Čechy, nikoli aktuální pozorování.',
-        'muted'),
-      $('p',
-        'LPIS eviduje deklarované plodiny, nikoli skutečné kvetení nebo množství nektaru. Vzdálenost je odhadnuta ze středu polygonu pozemku. Potenciál není předpovědí výnosu medu.',
-        'muted')
-    );
-
-    const button = $('button', 'Aktualizovat plodiny a počasí', 'btn primary');
-    button.type = 'button';
-    button.addEventListener('click', () => update(target));
-    panel.append(button);
-
-    target.append(panel);
-  }
-
-  async function update(target) {
-    target.replaceChildren($('div', 'Načítám pozemky LPIS a počasí…', 'panel'));
-
-    try {
-      
-      const [parcels, weather, ndvi] = await Promise.all([
-        loadParcels(),
-        loadWeather(),
-        loadNdvi().catch(error => {
-          console.warn('Sentinel-2 NDVI:', error);
-          return null;
-        })
-      ]);
-
-      const data = {
-        updated: new Date().toISOString(),
-        parcels,
-        weather,
-        ndvi
-      };
-
-
-      setCache(data);
-      render(target, data, false);
-      return data;
-    } catch (error) {
-      console.warn('Předpověď snůšky:', error);
-      const saved = getCache();
-
-      if (saved) {
-        render(target, saved, true);
-      } else {
-        target.replaceChildren($('div',
-          'Předpověď není dostupná. Připojte se k internetu a zkuste to znovu.',
-          'notice warn'));
-      }
-      return saved;
-    }
-  }
-
-  function start() {
-    const forage = document.getElementById('forage');
-    if (!forage || document.getElementById('forecastPanel')) return;
-
-    const target = $('div');
-    target.id = 'forecastPanel';
-    forage.insertBefore(target, forage.firstChild);
-
-    const saved = getCache();
-    if (saved) render(target, saved, true);
-    else target.append($('div', 'Předpověď se načte při připojení k internetu.', 'notice'));
-
-    update(target);
-  }
-
-  window.VcelarForecast = { update, getCache };
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start);
-  } else {
-    start();
-  }
+  async function update(target){target.replaceChildren($('div','Načítám LPIS, počasí a Sentinel‑2…','panel'));try{const [parcels,weather,ndvi]=await Promise.all([getParcels(),getWeather(),getNdvi().catch(e=>{console.warn(e);return null;})]);const data={updated:new Date().toISOString(),parcels,weather,ndvi};save(data);render(target,data,false);}catch(e){console.warn('Prognóza pastvy:',e);const old=cached();if(old)render(target,old,true);else target.replaceChildren($('div','Prognóza není dostupná. Zkontrolujte připojení a zkuste aktualizaci.','notice warn'));}}
+  function start(){const forage=document.getElementById('forage');if(!forage||document.getElementById('forecastPanel'))return;const target=$('div');target.id='forecastPanel';forage.insertBefore(target,forage.firstChild);const old=cached();if(old)render(target,old,true);else target.append($('div','Prognóza se načte při připojení k internetu.','notice'));update(target);}
+  window.VcelarForecast={update,getCache:cached};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
 })();
