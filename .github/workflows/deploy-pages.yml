@@ -187,7 +187,8 @@ jobs:
           npx esbuild app.js --bundle --outfile=../public/app.bundle.js --platform=browser --format=iife --loader:.geojson=json
           cd ..
           cp -a source/. public/
-
+          # Použít aktuální mapu z kořene repozitáře
+          cp -f map.js public/map.js 
           cp forecast.js public/forecast.js
           mkdir -p public/data
           cp data/ndvi-latest.json public/data/ndvi-latest.json
