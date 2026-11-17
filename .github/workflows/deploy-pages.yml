@@ -33,6 +33,17 @@ jobs:
         run: |
           mkdir -p source public
           unzip -o Vcelar_Osek_STANOVISTE_OPRAVA.zip -d source
+          # Zachovat původní hnědo-zlatý index z archivu a opravit pouze chybějící začátek SVG.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("source/index.html")
+          s = p.read_text()
+          old = '<div class="mapbox">svg viewBox="0 0 360 300"'
+          new = '<div class="mapbox"><svg viewBox="0 0 360 300"'
+          if s.count(old) != 1:
+              raise SystemExit("Očekávané poškozené SVG v původním index.html nebylo nalezeno právě jednou.")
+          p.write_text(s.replace(old, new, 1))
+          PY
           cp app.js source/app.js
           python3 - <<'PY'
           from pathlib import Path
@@ -188,8 +199,6 @@ jobs:
           npx esbuild app.js --bundle --outfile=../public/app.bundle.js --platform=browser --format=iife --loader:.geojson=json
           cd ..
           cp -a source/. public/
-          # Použít aktuální index.html z kořene repozitáře, ne starou kopii z ZIP archivu.
-          cp -f index.html public/index.html
           # Použít aktuální mapu z kořene repozitáře
           cp -f map.js public/map.js
           cp forecast.js public/forecast.js
