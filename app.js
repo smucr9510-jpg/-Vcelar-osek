@@ -3,8 +3,14 @@ const SITE={name:'TORENO, s.r.o., Osek 489',lat:49.7804535,lon:13.5998565};
 const KEY='vcelarOsek.data.v2';
 const $=id=>document.getElementById(id);const today=()=>new Date().toISOString().slice(0,10);const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const seed=()=>({colonies:[1,2,3,4].map(n=>({id:'seed'+n,name:'Úl '+n,type:'Adamec 11 rámků',date:'',state:'Aktivní',notes:''})),checks:[],forage:[],parcels:[],updated:new Date().toISOString()});
-let db;try{db=JSON.parse(localStorage.getItem(KEY)||'null')}catch{db=null}if(!db||!Array.isArray(db.colonies))db=seed();
-function save(){db.updated=new Date().toISOString();try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){alert('Nepodařilo se uložit data. Zkontrolujte volné místo v telefonu.');}renderAll()}
+let db;
+const DB_NAME='vcelarOsekDB',DB_STORE='appData';
+function openDatabase(){return new Promise((resolve,reject)=>{const request=indexedDB.open(DB_NAME,1);request.onupgradeneeded=()=>{if(!request.result.objectStoreNames.contains(DB_STORE))request.result.createObjectStore(DB_STORE)};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error||new Error('Nelze otevřít IndexedDB'))})}
+async function readStoredData(){const idb=await openDatabase();const stored=await new Promise((resolve,reject)=>{const tx=idb.transaction(DB_STORE,'readonly');const req=tx.objectStore(DB_STORE).get(KEY);req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error)});if(stored&&Array.isArray(stored.colonies)){idb.close();return stored}let legacy=null;try{legacy=JSON.parse(localStorage.getItem(KEY)||'null')}catch{}const data=legacy&&Array.isArray(legacy.colonies)?legacy:seed();await new Promise((resolve,reject)=>{const tx=idb.transaction(DB_STORE,'readwrite');tx.objectStore(DB_STORE).put(data,KEY);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Migrace dat se nezdařila'))});idb.close();return data}
+async function persistData(){const idb=await openDatabase();await new Promise((resolve,reject)=>{const tx=idb.transaction(DB_STORE,'readwrite');tx.objectStore(DB_STORE).put(db,KEY);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('Uložení dat se nezdařilo'))});idb.close()}
+function save(){db.updated=new Date().toISOString();persistData().catch(e=>{console.error(e);alert('Data se nepodařilo uložit do IndexedDB: '+(e.message||e))});renderAll()}
+async function startApp(){
+ db=await readStoredData();
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function page(id){document.querySelectorAll('.page').forEach(x=>x.classList.toggle('hidden',x.id!==id));document.querySelectorAll('#nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===id));if(id==='checks')fillColonySelect()}
 $('nav').addEventListener('click',e=>{let b=e.target.closest('button[data-page]');if(b)page(b.dataset.page)});
@@ -102,3 +108,5 @@ $('importFile').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let 
 $('resetData').onclick=()=>{if(confirm('Opravdu trvale vymazat všechna data aplikace v tomto zařízení? Doporučujeme nejprve exportovat zálohu.')){db=seed();save();$('backupStatus').textContent='Data byla vymazána a obnovena výchozí čtyři včelstva.'}};
 function net(){let on=navigator.onLine;$('net').textContent=on?'Aplikace připravena · online':'Offline režim · data v telefonu';$('net').classList.toggle('no',!on)}window.addEventListener('online',net);window.addEventListener('offline',net);net();
 if('serviceWorker'in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}))}renderAll();
+}
+startApp().catch(e=>{console.error(e);alert('Aplikaci se nepodařilo spustit: '+(e.message||e))});
