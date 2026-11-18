@@ -1,43 +1,55 @@
 /* Včelař – Osek | sjednocení rozměrů formulářových polí
-   Připojit v index.html v <head>: <link rel="stylesheet" href="fields.css">
+   Datumová pole jsou výslovně omezena na stejnou šířku jako ostatní pole,
+   včetně vnitřního ovládacího prvku Safari na iPhonu.
 */
+
+input:not([type="hidden"]),
+select,
+textarea {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font: inherit;
+  color: var(--ink, #211509);
+  border: 1px solid #cba45a;
+  border-radius: 10px;
+  background: #fffdf4;
+}
+
 input:not([type="hidden"]),
 select {
-  box-sizing: border-box;
-  width: 100%;
   height: 46px;
   min-height: 46px;
   padding: 0 11px;
   line-height: normal;
-  font: inherit;
-  border: 1px solid #cba45a;
-  border-radius: 10px;
-  background: #fffdf4;
-  color: var(--ink, #211509);
 }
 
+/* Safari / iOS: datum nesmí přetékat přes šířku sloupce. */
 input[type="date"] {
-  display: block;
   -webkit-appearance: none;
   appearance: none;
-  min-width: 0;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  padding-inline: 8px;
+  overflow: hidden;
 }
 
 input[type="date"]::-webkit-date-and-time-value {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
   text-align: left;
 }
 
 textarea {
-  box-sizing: border-box;
-  width: 100%;
   min-height: 100px;
   padding: 11px;
   line-height: 1.45;
-  font: inherit;
-  border: 1px solid #cba45a;
-  border-radius: 10px;
-  background: #fffdf4;
-  color: var(--ink, #211509);
+  resize: vertical;
 }
 
 input:focus,
@@ -47,10 +59,9 @@ textarea:focus {
   outline-offset: 1px;
 }
 
-@media (max-width: 700px) {
-  input:not([type="hidden"]),
-  select {
-    height: 46px;
-    min-height: 46px;
-  }
+/* Zabrání roztažení prvků uvnitř mřížky formulářů. */
+.grid > *,
+.field {
+  min-width: 0;
+  max-width: 100%;
 }
