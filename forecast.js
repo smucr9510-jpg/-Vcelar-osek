@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 11 | Karty plodin a mapa nektarodárných ploch.
+   Verze: 12 | Karty plodin a opravené přepočítání velikosti mapy.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -196,7 +196,7 @@
       .vcelar-crop-meta span{padding:5px 8px;border-radius:20px;background:#f2e4bd;font-size:13px}
       .vcelar-crop-detail{display:grid;grid-template-columns:minmax(105px,.8fr) minmax(0,1.2fr);gap:8px;padding:8px 0;border-top:1px solid #eadbb9;font-size:14px;line-height:1.4}
       .vcelar-crop-detail span{overflow-wrap:anywhere}
-      .vcelar-forage-map{width:100%;height:360px;min-height:300px;border-radius:13px;overflow:hidden;background:#e8eee6;border:1px solid #d7b45d}
+      .vcelar-forage-map{display:block;position:relative;width:100%;min-width:0;height:360px;min-height:300px;border-radius:13px;overflow:hidden;background:#e8eee6;border:1px solid #d7b45d}
       .vcelar-map-status{margin:8px 0 14px;padding:8px 10px;background:#f7edcf;border-radius:10px;color:#715b3e;font-size:13px}
       @media(max-width:420px){.vcelar-crop-detail{grid-template-columns:1fr;gap:2px}.vcelar-forage-map{height:320px}}
     `;
@@ -236,7 +236,18 @@
       L.marker([SITE.lat,SITE.lon]).addTo(map).bindPopup('<b>Stanoviště TORENO – Osek</b>');
       [1,2,3,5].forEach((km,i)=>L.circle([SITE.lat,SITE.lon],{radius:km*1000,color:['#4b9655','#769b55','#a1a85a','#b58a43'][i],weight:1,fill:false,dashArray:'5 6'}).addTo(map));
       const bounds=layer.getBounds();if(bounds.isValid())map.fitBounds(bounds.pad(.12),{maxZoom:14});else map.setView([SITE.lat,SITE.lon],12);
-      setTimeout(()=>map.invalidateSize(),180);
+
+      // Mapa se v aplikaci vytváří uvnitř záložky Pastva.
+      // Na mobilu může prohlížeč nejprve oznámit Leafletu neúplnou velikost panelu.
+      const refreshMapSize=()=>{if(element.isConnected)map.invalidateSize({pan:false,animate:false});};
+      requestAnimationFrame(()=>{refreshMapSize();requestAnimationFrame(refreshMapSize);});
+      [250,600,1200].forEach(ms=>setTimeout(refreshMapSize,ms));
+      if('ResizeObserver' in window){
+        const observer=new ResizeObserver(()=>refreshMapSize());
+        observer.observe(element);
+        map.once('unload',()=>observer.disconnect());
+      }
+      map.whenReady(refreshMapSize);
       status.textContent='Zobrazeno '+features.length+' pozemků s konkrétně evidovanou plodinou. Barvy rozlišují orientační význam zdroje, nikoli potvrzenou snůšku.';
     }).catch(e=>{console.warn('Mapa pastvy:',e);status.textContent='Mapu se nepodařilo načíst. Přehled plodin a vzdáleností zůstává dostupný.';});
   }
