@@ -111,7 +111,12 @@
     const add=(heading,items,empty)=>{panel.append($('h4',heading));if(!items.length){panel.append($('div',empty,'item'));return;}items.forEach(x=>{const row=$('div',undefined,'item');row.append($('b',x.name+' · '+monthName(x.from)+'–'+monthName(x.to)),$('div',x.kind),$('div',x.group+' – '+x.note,'muted'));panel.append(row);});};
     add('Pravděpodobné období právě nyní',cal.current,'V tomto měsíci není v kalendáři uveden hlavní druh.');
     add('Další druhy v následujících třech měsících',cal.next.filter(x=>!cal.current.includes(x)),'Žádné další druhy v nejbližším období.');
-    const table=$('div',undefined,'item');table.append($('b','Roční přehled'));BLOOMS.forEach(x=>table.append($('div',x.name+' · '+monthName(x.from)+' až '+monthName(x.to)+' · '+x.kind)));panel.append(table);
+    panel.append($('h4','Roční přehled'));
+    BLOOMS.forEach(x=>{
+      const row=$('div',undefined,'item');
+      row.append($('b',x.name),$('div',monthName(x.from)+' až '+monthName(x.to)),$('div',x.kind,'muted'));
+      panel.append(row);
+    });
     panel.append($('p','Skutečný začátek kvetení se může podle nadmořské výšky, odrůdy a průběhu počasí posunout i o několik týdnů. Teplotní a srážková předpověď je zobrazena níže samostatně; kalendář proto automaticky netvrdí, že rostlina právě kvete.','muted'));
   }
 
