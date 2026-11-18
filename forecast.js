@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 8 | Zachovává původní datové zdroje a offline cache.
+   Verze: 10 | Rozšířený přehled plodin, vzdáleností a sezónního významu.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -7,7 +7,7 @@
   const SITE = { lat: 49.7804535, lon: 13.5998565 };
   const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
   const ZABAGED = 'https://ags.cuzk.gov.cz/arcgis/rest/services/ZABAGED_POLOHOPIS/MapServer';
-  const CACHE = 'vcelarOsek.forecast.v9';
+  const CACHE = 'vcelarOsek.forecast.v10';
   const CLIMATE_CACHE = 'vcelarOsek.phenologyClimate.v1';
   const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
   const DB_NAME = 'vcelarOsekDB', DB_STORE = 'appData', DB_KEY = 'vcelarOsek.data.v2';
@@ -219,10 +219,31 @@
     const unknown=data.parcels.filter(p=>!p.name||p.name==='Konkrétní plodina nezjištěna');
     if(known.length){
       const cropGroups=new Map();
-      known.forEach(p=>{const k=p.name;if(!cropGroups.has(k))cropGroups.set(k,{area:0,count:0,rule:p.rule});const x=cropGroups.get(k);x.area+=p.area||0;x.count++;});
-      [...cropGroups.entries()].sort((a,b)=>b[1].area-a[1].area).forEach(([name,x])=>panel.append($('div',name+' · '+x.count+' pozemků · '+round(x.area)+' ha · '+(x.rule?'období kvetení v modelu evidováno':'bez přiřazeného období kvetení'),'item')));
+      known.forEach(p=>{
+        const k=p.name;
+        if(!cropGroups.has(k))cropGroups.set(k,{area:0,count:0,minDistance:Infinity,maxDistance:0,rule:p.rule||rule(k)});
+        const x=cropGroups.get(k);x.area+=p.area||0;x.count++;
+        x.minDistance=Math.min(x.minDistance,Number(p.distance)||0);
+        x.maxDistance=Math.max(x.maxDistance,Number(p.distance)||0);
+        if(!x.rule&&p.rule)x.rule=p.rule;
+      });
+      const monthSpan=r=>r.from===r.to?monthName(r.from):monthName(r.from)+'–'+monthName(r.to);
+      const importance=r=>!r?'neurčeno':r.score>=2.5?'významnější potenciál':r.score>=1.5?'střední potenciál':r.score>=.7?'nižší potenciál':'malý přímý přínos';
+      [...cropGroups.entries()].sort((a,b)=>b[1].area-a[1].area).forEach(([name,x])=>{
+        const row=$('div',undefined,'item');
+        row.append($('b',name+' · '+x.count+' pozemků · '+round(x.area)+' ha'));
+        row.append($('div','Vzdálenost od stanoviště: '+(Number.isFinite(x.minDistance)?x.minDistance.toFixed(2):'–')+' až '+x.maxDistance.toFixed(2)+' km'));
+        if(x.rule){
+          row.append($('div','Obvyklé období kvetení: '+monthSpan(x.rule)));
+          row.append($('div','Význam pro včely: '+x.rule.kind+' · '+importance(x.rule)));
+        }else{
+          row.append($('div','Období kvetení a význam pro včely: v modelu nejsou spolehlivě určeny.'));
+        }
+        panel.append(row);
+      });
     }else panel.append($('div','V aktuálně načtených LPIS záznamech není vyplněn konkrétní druh plodiny.','item'));
     panel.append($('div','Pozemky bez konkrétní plodiny: '+unknown.length+' záznamů · '+round(unknown.reduce((s,p)=>s+(p.area||0),0))+' ha. Jejich výměra je evidována, ale nelze ji poctivě přiřadit řepce, jeteli ani jiné plodině.','notice'));
+    panel.append($('p','Období kvetení jsou orientační sezónní intervaly modelu pro oblast Oseka, nikoli potvrzení aktuálního květu. Význam pro včely je kvalitativní odhad podle typu zdroje; LPIS potvrzuje evidovanou plodinu a plochu, ne produkci nektaru ani skutečnou snůšku.','muted'));
     const cultures=new Map();data.parcels.forEach(p=>{const k=p.culture||'Kultura neuvedena';cultures.set(k,(cultures.get(k)||0)+1);});
     if(cultures.size)panel.append($('p','Druhy evidované kultury pozemků: '+[...cultures.entries()].map(([k,v])=>k+' ('+v+')').join(', ')+'. Kultura pozemku není totéž co aktuálně pěstovaná plodina.','muted'));
     panel.append($('h3','Přehled evidovaných pozemků podle vzdálenosti'));RINGS.forEach(r=>{const a=data.parcels.filter(p=>p.distance<=r),area=a.reduce((s,p)=>s+p.area,0),withCrop=a.filter(p=>p.name&&p.name!=='Konkrétní plodina nezjištěna').length;panel.append($('div','Do '+r+' km · '+a.length+' pozemků · '+round(area)+' ha · konkrétní plodina uvedena u '+withCrop,'item'));});
