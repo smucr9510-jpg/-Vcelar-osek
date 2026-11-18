@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 10 | Rozšířený přehled plodin, vzdáleností a sezónního významu.
+   Verze: 11 | Karty plodin a mapa nektarodárných ploch.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -7,7 +7,7 @@
   const SITE = { lat: 49.7804535, lon: 13.5998565 };
   const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
   const ZABAGED = 'https://ags.cuzk.gov.cz/arcgis/rest/services/ZABAGED_POLOHOPIS/MapServer';
-  const CACHE = 'vcelarOsek.forecast.v10';
+  const CACHE = 'vcelarOsek.forecast.v11';
   const CLIMATE_CACHE = 'vcelarOsek.phenologyClimate.v1';
   const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
   const DB_NAME = 'vcelarOsekDB', DB_STORE = 'appData', DB_KEY = 'vcelarOsek.data.v2';
@@ -84,8 +84,8 @@
   }
   async function getParcels(){
     try{const r=await fetch(GEOJSON,{cache:'no-store'});if(!r.ok)throw Error('LPIS export není dostupný');const j=await r.json();
-      return(j.features||[]).flatMap(f=>{const p=f.properties||{},name=String(p.plodina||p.PLODINA||p.crop||p.CROP||''),c=centerPts(points(f.geometry));if(!c)return[];const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);return distance<=5.15?[{name:name||'Konkrétní plodina nezjištěna',culture:String(p.kultura||p.KULTURA||''),distance,area:Number(p.deklarovana_vymera_ha||p.dpb_vymera_ha||0),rule:name?rule(name):null}]:[];});
-    }catch(e){console.warn('LPIS export:',e);const local=await readLocalParcels();return local.flatMap(p=>{const c=centerPts(points(p.geometry));if(!c)return[];const distance=dist(SITE.lat,SITE.lon,c[0],c[1]),name=explicitCrop(p);return distance<=5.15?[{name:name||'Konkrétní plodina nezjištěna',culture:String(p.culture||p.attributes?.kultura||p.attributes?.KULTURA||''),distance,area:Number(p.area||p.attributes?.vymera_ha||p.attributes?.VYMERA_HA||0),rule:name?rule(name):null}]:[];});}
+      return(j.features||[]).flatMap(f=>{const p=f.properties||{},name=String(p.plodina||p.PLODINA||p.crop||p.CROP||''),c=centerPts(points(f.geometry));if(!c)return[];const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);return distance<=5.15?[{name:name||'Konkrétní plodina nezjištěna',culture:String(p.kultura||p.KULTURA||''),distance,area:Number(p.deklarovana_vymera_ha||p.dpb_vymera_ha||0),rule:name?rule(name):null,geometry:f.geometry}]:[];});
+    }catch(e){console.warn('LPIS export:',e);const local=await readLocalParcels();return local.flatMap(p=>{const c=centerPts(points(p.geometry));if(!c)return[];const distance=dist(SITE.lat,SITE.lon,c[0],c[1]),name=explicitCrop(p);return distance<=5.15?[{name:name||'Konkrétní plodina nezjištěna',culture:String(p.culture||p.attributes?.kultura||p.attributes?.KULTURA||''),distance,area:Number(p.area||p.attributes?.vymera_ha||p.attributes?.VYMERA_HA||0),rule:name?rule(name):null,geometry:p.geometry}]:[];});}
   }
   function envelope(){const dy=5.25/111.32,dx=5.25/(111.32*Math.cos(SITE.lat*Math.PI/180));return{xmin:SITE.lon-dx,ymin:SITE.lat-dy,xmax:SITE.lon+dx,ymax:SITE.lat+dy};}
   async function getLayer(id){const u=new URL(`${ZABAGED}/${id}/query`),p={f:'json',where:'1=1',outFields:'*',returnGeometry:'true',geometry:JSON.stringify(envelope()),geometryType:'esriGeometryEnvelope',inSR:'4326',spatialRel:'esriSpatialRelIntersects',outSR:'4326',resultRecordCount:'2000'};Object.entries(p).forEach(([k,v])=>u.searchParams.set(k,v));const r=await fetch(u,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error)throw Error(j.error.message||'Chyba ZABAGED');return j.features||[];}
@@ -182,6 +182,65 @@
     panel.append($('h4','Roční přehled'));cal.all.forEach(x=>{const row=$('div',undefined,'item');row.append($('b',x.name),$('div',dateLabel(x.start)+' až '+dateLabel(x.end)),$('div',x.kind,'muted'));panel.append(row);});
     panel.append($('p','Skutečný začátek kvetení se může podle nadmořské výšky, odrůdy a počasí posunout i o několik týdnů. Kalendář nepotvrzuje, že rostlina právě kvete.','muted'));
   }
+
+  function addForageStyles(){
+    if(document.getElementById('vcelar-forage-card-styles'))return;
+    const style=$('style');style.id='vcelar-forage-card-styles';
+    style.textContent=`
+      .vcelar-crop-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px;margin:10px 0 16px}
+      .vcelar-crop-card{min-width:0;padding:14px;border:1px solid #e2c77f;border-radius:14px;background:#fff8e8;box-shadow:0 2px 7px #5a351018;color:#3e2412}
+      .vcelar-crop-card-title{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;font-size:17px;line-height:1.35}
+      .vcelar-crop-card-title strong{flex:1;overflow-wrap:anywhere}
+      .vcelar-crop-card-title span{white-space:nowrap;font-weight:700;color:#70420c}
+      .vcelar-crop-meta{display:flex;flex-wrap:wrap;gap:6px;margin:9px 0 12px}
+      .vcelar-crop-meta span{padding:5px 8px;border-radius:20px;background:#f2e4bd;font-size:13px}
+      .vcelar-crop-detail{display:grid;grid-template-columns:minmax(105px,.8fr) minmax(0,1.2fr);gap:8px;padding:8px 0;border-top:1px solid #eadbb9;font-size:14px;line-height:1.4}
+      .vcelar-crop-detail span{overflow-wrap:anywhere}
+      .vcelar-forage-map{width:100%;height:360px;min-height:300px;border-radius:13px;overflow:hidden;background:#e8eee6;border:1px solid #d7b45d}
+      .vcelar-map-status{margin:8px 0 14px;padding:8px 10px;background:#f7edcf;border-radius:10px;color:#715b3e;font-size:13px}
+      @media(max-width:420px){.vcelar-crop-detail{grid-template-columns:1fr;gap:2px}.vcelar-forage-map{height:320px}}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function loadForageLeaflet(){
+    if(window.L)return Promise.resolve(window.L);
+    return new Promise((resolve,reject)=>{
+      const existing=[...document.scripts].find(x=>x.src.includes('leaflet')&&x.src.includes('.js'));
+      if(existing){
+        existing.addEventListener('load',()=>window.L?resolve(window.L):reject(Error('Leaflet není dostupný')),{once:true});
+        existing.addEventListener('error',()=>reject(Error('Mapovou knihovnu se nepodařilo načíst')),{once:true});
+        const started=Date.now(),check=()=>{if(window.L)resolve(window.L);else if(Date.now()-started>12000)reject(Error('Čekání na mapovou knihovnu vypršelo'));else setTimeout(check,150);};check();
+        return;
+      }
+      const css=document.createElement('link');css.rel='stylesheet';css.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(css);
+      const script=document.createElement('script');script.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      script.onload=()=>window.L?resolve(window.L):reject(Error('Leaflet není dostupný'));
+      script.onerror=()=>reject(Error('Mapovou knihovnu se nepodařilo načíst'));document.head.appendChild(script);
+    });
+  }
+
+  function initForageMap(element,status,parcels){
+    const features=parcels.filter(p=>p.geometry&&p.geometry.type&&p.name&&p.name!=='Konkrétní plodina nezjištěna');
+    if(!features.length){status.textContent='Pro mapu nejsou v načtených datech dostupné geometrie pozemků s konkrétní plodinou.';return;}
+    if(!navigator.onLine){status.textContent='Jste offline. Přehled plodin zůstává dostupný, mapové podklady vyžadují internet.';return;}
+    loadForageLeaflet().then(L=>{
+      if(!element.isConnected)return;
+      const map=L.map(element,{preferCanvas:true,scrollWheelZoom:false}).setView([SITE.lat,SITE.lon],12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(map);
+      const colors=p=>!p.rule?'#78909c':p.rule.score>=2.5?'#2e8b57':p.rule.score>=1.5?'#76a64b':p.rule.score>=.7?'#d4a22e':'#9a9a9a';
+      const layer=L.geoJSON({type:'FeatureCollection',features:features.map((p,i)=>({type:'Feature',geometry:p.geometry,properties:{name:p.name,area:p.area,distance:p.distance,kind:p.rule?.kind||'neurčeno',color:colors(p),id:i}}))},{
+        style:f=>({color:f.properties.color,fillColor:f.properties.color,weight:1.2,fillOpacity:.42}),
+        onEachFeature:(f,l)=>{const p=f.properties;l.bindPopup('<b>'+String(p.name).replace(/[&<>"]/g,'')+'</b><br>'+Number(p.area||0).toFixed(1)+' ha<br>'+Number(p.distance||0).toFixed(2)+' km od stanoviště<br>'+String(p.kind).replace(/[&<>"]/g,''));}
+      }).addTo(map);
+      L.marker([SITE.lat,SITE.lon]).addTo(map).bindPopup('<b>Stanoviště TORENO – Osek</b>');
+      [1,2,3,5].forEach((km,i)=>L.circle([SITE.lat,SITE.lon],{radius:km*1000,color:['#4b9655','#769b55','#a1a85a','#b58a43'][i],weight:1,fill:false,dashArray:'5 6'}).addTo(map));
+      const bounds=layer.getBounds();if(bounds.isValid())map.fitBounds(bounds.pad(.12),{maxZoom:14});else map.setView([SITE.lat,SITE.lon],12);
+      setTimeout(()=>map.invalidateSize(),180);
+      status.textContent='Zobrazeno '+features.length+' pozemků s konkrétně evidovanou plodinou. Barvy rozlišují orientační význam zdroje, nikoli potvrzenou snůšku.';
+    }).catch(e=>{console.warn('Mapa pastvy:',e);status.textContent='Mapu se nepodařilo načíst. Přehled plodin a vzdáleností zůstává dostupný.';});
+  }
+
   function render(target,data,offline){
     target.replaceChildren();const panel=$('div',undefined,'panel');
     panel.append($('h2','🐝 Sezónní prognóza pastvy a snůšky'),$('p','Stanoviště Osek · LPIS + ZABAGED ČÚZK · okruhy 1–5 km','muted'),$('p',offline?'Poslední uložená data – offline.':'Aktualizováno: '+new Date(data.updated).toLocaleString('cs-CZ'),'muted'));
@@ -214,36 +273,53 @@
       estimates.forEach(x=>{const date=new Date(d.time[x.i]+'T12:00:00');panel.append($('div',date.toLocaleDateString('cs-CZ')+' · '+x.level+' · let '+x.flight.score+'/100'+(x.items.length?' · možné zdroje: '+x.items.slice(0,4).join(', '):' · bez určeného aktivního zdroje'),'item'));});
     } else panel.append($('div','Odhad není dostupný bez denní předpovědi počasí.','item'));
 
-    panel.append($('h3','🌾 Konkrétní plodiny z evidence LPIS'));
+    addForageStyles();
+    panel.append($('h3','🌾 Plodiny z evidence LPIS – přehledné karty'));
     const known=data.parcels.filter(p=>p.name&&p.name!=='Konkrétní plodina nezjištěna');
     const unknown=data.parcels.filter(p=>!p.name||p.name==='Konkrétní plodina nezjištěna');
-    if(known.length){
-      const cropGroups=new Map();
-      known.forEach(p=>{
-        const k=p.name;
-        if(!cropGroups.has(k))cropGroups.set(k,{area:0,count:0,minDistance:Infinity,maxDistance:0,rule:p.rule||rule(k)});
-        const x=cropGroups.get(k);x.area+=p.area||0;x.count++;
-        x.minDistance=Math.min(x.minDistance,Number(p.distance)||0);
-        x.maxDistance=Math.max(x.maxDistance,Number(p.distance)||0);
-        if(!x.rule&&p.rule)x.rule=p.rule;
-      });
-      const monthSpan=r=>r.from===r.to?monthName(r.from):monthName(r.from)+'–'+monthName(r.to);
-      const importance=r=>!r?'neurčeno':r.score>=2.5?'významnější potenciál':r.score>=1.5?'střední potenciál':r.score>=.7?'nižší potenciál':'malý přímý přínos';
-      [...cropGroups.entries()].sort((a,b)=>b[1].area-a[1].area).forEach(([name,x])=>{
-        const row=$('div',undefined,'item');
-        row.append($('b',name+' · '+x.count+' pozemků · '+round(x.area)+' ha'));
-        row.append($('div','Vzdálenost od stanoviště: '+(Number.isFinite(x.minDistance)?x.minDistance.toFixed(2):'–')+' až '+x.maxDistance.toFixed(2)+' km'));
-        if(x.rule){
-          row.append($('div','Obvyklé období kvetení: '+monthSpan(x.rule)));
-          row.append($('div','Význam pro včely: '+x.rule.kind+' · '+importance(x.rule)));
-        }else{
-          row.append($('div','Období kvetení a význam pro včely: v modelu nejsou spolehlivě určeny.'));
-        }
-        panel.append(row);
-      });
-    }else panel.append($('div','V aktuálně načtených LPIS záznamech není vyplněn konkrétní druh plodiny.','item'));
-    panel.append($('div','Pozemky bez konkrétní plodiny: '+unknown.length+' záznamů · '+round(unknown.reduce((s,p)=>s+(p.area||0),0))+' ha. Jejich výměra je evidována, ale nelze ji poctivě přiřadit řepce, jeteli ani jiné plodině.','notice'));
-    panel.append($('p','Období kvetení jsou orientační sezónní intervaly modelu pro oblast Oseka, nikoli potvrzení aktuálního květu. Význam pro včely je kvalitativní odhad podle typu zdroje; LPIS potvrzuje evidovanou plodinu a plochu, ne produkci nektaru ani skutečnou snůšku.','muted'));
+    const cropGroups=new Map();
+    known.forEach(p=>{
+      const k=p.name;
+      if(!cropGroups.has(k))cropGroups.set(k,{area:0,count:0,minDistance:Infinity,maxDistance:0,rule:p.rule||rule(k),features:[]});
+      const x=cropGroups.get(k);x.area+=p.area||0;x.count++;
+      x.minDistance=Math.min(x.minDistance,Number(p.distance)||0);
+      x.maxDistance=Math.max(x.maxDistance,Number(p.distance)||0);
+      if(!x.rule&&p.rule)x.rule=p.rule;
+      if(p.geometry&&p.geometry.type)x.features.push(p);
+    });
+    const monthSpan=r=>r.from===r.to?monthName(r.from):monthName(r.from)+'–'+monthName(r.to);
+    const importance=r=>!r?'neurčeno':r.score>=2.5?'významnější potenciál':r.score>=1.5?'střední potenciál':r.score>=.7?'nižší potenciál':'malý přímý přínos';
+    const cards=$('div');cards.className='vcelar-crop-grid';
+    [...cropGroups.entries()].sort((a,b)=>b[1].area-a[1].area).forEach(([name,x])=>{
+      const card=$('section');card.className='vcelar-crop-card';
+      const heading=$('div');heading.className='vcelar-crop-card-title';
+      heading.append($('strong',name),$('span',round(x.area)+' ha'));
+      card.append(heading);
+      const meta=$('div');meta.className='vcelar-crop-meta';
+      meta.append($('span',x.count+' pozemků'));
+      meta.append($('span',(Number.isFinite(x.minDistance)?x.minDistance.toFixed(2):'–')+' až '+x.maxDistance.toFixed(2)+' km od stanoviště'));
+      card.append(meta);
+      const bloom=$('div');bloom.className='vcelar-crop-detail';
+      bloom.append($('b','Obvyklé období kvetení'));
+      bloom.append($('span',x.rule?monthSpan(x.rule):'V modelu neurčeno'));
+      card.append(bloom);
+      const value=$('div');value.className='vcelar-crop-detail';
+      value.append($('b','Význam pro včely'));
+      value.append($('span',x.rule?x.rule.kind+' · '+importance(x.rule):'Není spolehlivě určen'));
+      card.append(value);
+      cards.append(card);
+    });
+    if(!known.length)cards.append($('div','V aktuálně načtených LPIS záznamech není vyplněn konkrétní druh plodiny.','item'));
+    panel.append(cards);
+    panel.append($('div','Pozemky bez konkrétní plodiny: '+unknown.length+' záznamů · '+round(unknown.reduce((s,p)=>s+(p.area||0),0))+' ha. Jejich výměra je evidována, ale nelze ji poctivě přiřadit konkrétní plodině.','notice'));
+    panel.append($('p','Období kvetení jsou orientační sezónní intervaly modelu pro oblast Oseka, nikoli potvrzení aktuálního květu. Význam pro včely je kvalitativní odhad. LPIS potvrzuje evidovanou plodinu a plochu, nikoli produkci nektaru ani skutečnou snůšku.','muted'));
+
+    panel.append($('h3','🗺️ Mapa evidovaných plodin v okolí stanoviště'));
+    panel.append($('p','Barevné plochy představují pozemky s konkrétně evidovanou plodinou. Klepnutím na plochu zobrazíš její název, výměru a vzdálenost. Mapa vyžaduje připojení k internetu.','muted'));
+    const mapBox=$('div');mapBox.id='vcelarForageMap';mapBox.className='vcelar-forage-map';
+    panel.append(mapBox);
+    const mapStatus=$('div','Připravuji mapu pozemků…','vcelar-map-status');mapStatus.id='vcelarForageMapStatus';panel.append(mapStatus);
+    initForageMap(mapBox,mapStatus,data.parcels);
     const cultures=new Map();data.parcels.forEach(p=>{const k=p.culture||'Kultura neuvedena';cultures.set(k,(cultures.get(k)||0)+1);});
     if(cultures.size)panel.append($('p','Druhy evidované kultury pozemků: '+[...cultures.entries()].map(([k,v])=>k+' ('+v+')').join(', ')+'. Kultura pozemku není totéž co aktuálně pěstovaná plodina.','muted'));
     panel.append($('h3','Přehled evidovaných pozemků podle vzdálenosti'));RINGS.forEach(r=>{const a=data.parcels.filter(p=>p.distance<=r),area=a.reduce((s,p)=>s+p.area,0),withCrop=a.filter(p=>p.name&&p.name!=='Konkrétní plodina nezjištěna').length;panel.append($('div','Do '+r+' km · '+a.length+' pozemků · '+round(area)+' ha · konkrétní plodina uvedena u '+withCrop,'item'));});
