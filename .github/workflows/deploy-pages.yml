@@ -33,18 +33,40 @@ jobs:
         run: |
           mkdir -p source public
           unzip -o Vcelar_Osek_STANOVISTE_OPRAVA.zip -d source
-          # Zachovat původní hnědo-zlatý index z archivu a opravit pouze chybějící začátek SVG.
+
+          # ZIP je pouze zdroj původních assetů. Hlavní HTML a JS jsou vždy
+          # autoritativní soubory v kořeni repozitáře.
           python3 - <<'PY'
           from pathlib import Path
           p = Path("source/index.html")
           s = p.read_text()
           old = '<div class="mapbox">svg viewBox="0 0 360 300"'
           new = '<div class="mapbox"><svg viewBox="0 0 360 300"'
+          if old in s:
+              if s.count(old) != 1:
+                  raise SystemExit("Archiv obsahuje neočekávaný počet poškozených SVG značek.")
+              p.write_text(s.replace(old, new, 1))
+          elif new not in s:
+              raise SystemExit("V archivním index.html nebylo nalezeno očekávané SVG.")
+          PY
+
+          # Přepsat archivní index aktuálním indexem z kořene repozitáře.
+          cp index.html source/index.html
+          cp app.js source/app.js
+
+          # Pokud je databáze prázdná, doplnit čtyři výchozí úly.
+          # Existující včelstva, kontroly, pastva i pozemky zůstávají beze změny.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("source/app.js")
+          s = p.read_text()
+          old = " db=await readDB();"
+          new = " db=await readDB();\n if(!Array.isArray(db.colonies)||db.colonies.length===0){\n   db.colonies=seed().colonies;\n   await writeDB(structuredClone(db));\n }"
           if s.count(old) != 1:
-              raise SystemExit("Očekávané poškozené SVG v původním index.html nebylo nalezeno právě jednou.")
+              raise SystemExit("V app.js nebylo nalezeno jediné místo načtení databáze; sestavení zastaveno.")
           p.write_text(s.replace(old, new, 1))
           PY
-          cp app.js source/app.js
+
           python3 - <<'PY'
           from pathlib import Path
           p = Path("source/app.js")
@@ -199,7 +221,6 @@ jobs:
           npx esbuild app.js --bundle --outfile=../public/app.bundle.js --platform=browser --format=iife --loader:.geojson=json
           cd ..
           cp -a source/. public/
-          # Použít aktuální mapu z kořene repozitáře
           cp -f map.js public/map.js
           cp forecast.js public/forecast.js
           mkdir -p public/data
@@ -210,13 +231,16 @@ jobs:
 
           p = Path("public/index.html")
           s = p.read_text()
-          old = '<script src="map.js"></script>'
-          new = old + '<script src="forecast.js"></script>'
-          if old not in s:
-              raise SystemExit("Nenalezeno místo pro vložení forecast.js")
-          p.write_text(s.replace(old, new, 1))
+          if '<script src="map.js"></script>' not in s:
+              raise SystemExit("V index.html chybí načtení map.js")
+          if '<script src="forecast.js"></script>' not in s:
+              s = s.replace(
+                  '<script src="map.js"></script>',
+                  '<script src="map.js"></script><script src="forecast.js"></script>',
+                  1
+              )
+          p.write_text(s)
 
-          # Update the service worker itself (not index.html).
           p = Path("public/sw.js")
           s = p.read_text()
           s, count = re.subn(
