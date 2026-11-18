@@ -154,7 +154,12 @@
     return{current,next,all:adjusted,shift};
   }
   function ndviInfo(data,r){const a=data?.rings?.[String(r)]||[],v=a.map(x=>({date:x.interval?.to,mean:x.outputs?.ndvi?.bands?.B0?.stats?.mean})).filter(x=>x.date&&Number.isFinite(x.mean));if(!v.length)return null;const last=v[v.length-1],prev=v.length>1?v[v.length-2]:null;return{...last,change:prev?last.mean-prev.mean:null};}
-  function flightStatus(w){const d=w?.daily;if(!d?.time?.length)return'Počasí není dostupné';const t=d.temperature_2m_max?.[0],rain=d.precipitation_sum?.[0],wind=d.wind_speed_10m_max?.[0];if(t==null||rain==null||wind==null)return'Neúplné údaje';if(t<10)return'Chladno – omezený let';if(rain>=2)return'Déšť může omezit let';if(wind>=30)return'Silný vítr';if(t>=15&&rain<1&&wind<20)return'Příznivé podmínky pro let';return'Proměnlivé podmínky';}
+  function futureWeatherIndices(d){
+    if(!d?.time?.length)return[];
+    const today=new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Prague'});
+    return d.time.map((date,i)=>({date,i})).filter(x=>x.date>=today).map(x=>x.i);
+  }
+  function flightStatus(w,index){const d=w?.daily;if(!d?.time?.length||index==null)return'Budoucí předpověď není dostupná';const t=d.temperature_2m_max?.[index],rain=d.precipitation_sum?.[index],wind=d.wind_speed_10m_max?.[index];if(t==null||rain==null||wind==null)return'Neúplné údaje';if(t<10)return'Chladno – omezený let';if(rain>=2)return'Déšť může omezit let';if(wind>=30)return'Silný vítr';if(t>=15&&rain<1&&wind<20)return'Příznivé podmínky pro let';return'Proměnlivé podmínky';}
 
   function renderCalendar(panel,signal){
     const cal=bloomCalendar(signal);panel.append($('h3','🌸 Kalendář kvetení dřevin a keřů'));
@@ -189,7 +194,10 @@
     panel.append($('p','Plochy jsou orientačně přiřazeny podle středu ohraničujícího obdélníku; malé objekty u hranice okruhu se mohou zařadit nepřesně.','muted'));
     panel.append($('h3','🛰️ Sentinel-2 – vývoj vegetace'));RINGS.forEach(r=>{const n=ndviInfo(data.ndvi,r);panel.append($('div',n?'Okruh '+r+' km · NDVI '+n.mean.toFixed(3)+(n.change==null?'':' · změna '+(n.change>0?'+':'')+n.change.toFixed(3))+' · '+new Date(n.date).toLocaleDateString('cs-CZ'):'Okruh '+r+' km · NDVI není dostupné','item'));});
     panel.append($('p','NDVI ukazuje zelenost vegetace, nikoli přímo kvetení nebo nektar.','muted'));
-    panel.append($('h3','🌦️ Podmínky letu včel – následujících 7 dní'),$('p',flightStatus(data.weather),'notice'));const d=data.weather?.daily;if(d?.time)(d.time||[]).forEach((date,i)=>panel.append($('div',new Date(date).toLocaleDateString('cs-CZ')+' · '+(d.temperature_2m_max?.[i]??'–')+' °C · déšť '+(d.precipitation_sum?.[i]??'–')+' mm · vítr '+(d.wind_speed_10m_max?.[i]??'–')+' km/h','item')));
+    const d=data.weather?.daily, futureIndices=futureWeatherIndices(d);
+    panel.append($('h3','🌦️ Podmínky letu včel – následujících 7 dní'),$('p',flightStatus(data.weather,futureIndices[0]),'notice'));
+    if(futureIndices.length){futureIndices.forEach(i=>{const date=d.time[i];panel.append($('div',new Date(date+'T12:00:00').toLocaleDateString('cs-CZ')+' · '+(d.temperature_2m_max?.[i]??'–')+' °C · déšť '+(d.precipitation_sum?.[i]??'–')+' mm · vítr '+(d.wind_speed_10m_max?.[i]??'–')+' km/h','item'));});}
+    else panel.append($('div','Aktuální předpověď není dostupná. Zkuste prognózu aktualizovat.','item'));
     panel.append($('h3','Přehled evidovaných plodin podle vzdálenosti'));RINGS.forEach(r=>{const a=data.parcels.filter(p=>p.distance<=r),area=a.reduce((s,p)=>s+p.area,0);panel.append($('div','Do '+r+' km · '+a.length+' záznamů plodin · '+round(area)+' ha','item'));});
     const btn=$('button','Aktualizovat prognózu','btn primary');btn.type='button';btn.addEventListener('click',()=>update(target));panel.append(btn);target.append(panel);
   }
