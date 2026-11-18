@@ -31,8 +31,6 @@
     {re:/travní porost|trávy|trav čeledi/i,label:'Travní porosty',from:5,to:9,score:.8,kind:'především pyl'}
   ];
 
-  // Orientační fenologický kalendář pro oblast Oseka.
-  // Nejde o potvrzení výskytu druhu na konkrétním pozemku.
   const BLOOMS = [
     {name:'Líska',from:2,to:3,kind:'Především pyl',group:'Keře a lesní okraje',note:'Časný pylový zdroj; význam závisí na počasí.'},
     {name:'Olše',from:2,to:3,kind:'Především pyl',group:'Lesní dřeviny',note:'Časný pylový zdroj.'},
@@ -86,9 +84,7 @@
   async function getLayer(id){const u=new URL(`${ZABAGED}/${id}/query`),p={f:'json',where:'1=1',outFields:'*',returnGeometry:'true',geometry:JSON.stringify(envelope()),geometryType:'esriGeometryEnvelope',inSR:'4326',spatialRel:'esriSpatialRelIntersects',outSR:'4326',resultRecordCount:'2000'};Object.entries(p).forEach(([k,v])=>u.searchParams.set(k,v));const r=await fetch(u,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error)throw Error(j.error.message||'Chyba ZABAGED');return j.features||[];}
   async function getLandscape(){const results=await Promise.allSettled(NATURAL.map(x=>getLayer(x.id))),features=[];results.forEach((res,i)=>{const d=NATURAL[i];if(res.status!=='fulfilled'){console.warn('ZABAGED:',d.id,res.reason);return;}res.value.forEach(f=>{const c=arcCenter(f.geometry);if(!c)return;const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);if(distance>5.15)return;features.push({key:d.key,label:d.label,distance,area:arcArea(f)/10000,from:d.from,to:d.to,score:d.score});});});return{features,layerStatus:NATURAL.map((d,i)=>({name:d.label,ok:results[i].status==='fulfilled',count:results[i].status==='fulfilled'?results[i].value.length:0}))};}
   async function getWeather(){const u=new URL('https://api.open-meteo.com/v1/forecast');u.search=new URLSearchParams({latitude:SITE.lat,longitude:SITE.lon,daily:'temperature_2m_mean,temperature_2m_max,precipitation_sum,wind_speed_10m_max',past_days:'30',forecast_days:'7',timezone:'Europe/Prague'});const r=await fetch(u);if(!r.ok)throw Error('Počasí není dostupné');return r.json();}
-  function climateCached(){
-    try{const x=JSON.parse(localStorage.getItem(CLIMATE_CACHE)||'null');return x&&Date.now()-x.savedAt<30*86400000?x.data:null;}catch(_){return null;}
-  }
+  function climateCached(){try{const x=JSON.parse(localStorage.getItem(CLIMATE_CACHE)||'null');return x&&Date.now()-x.savedAt<30*86400000?x.data:null;}catch(_){return null;}}
   async function getClimateNormals(){
     const old=climateCached();if(old)return old;
     const u=new URL(CLIMATE_URL);
@@ -96,11 +92,7 @@
     const r=await fetch(u);if(!r.ok)throw Error('Klimatický normál není dostupný');
     const j=await r.json();if(!j.daily?.time||!j.daily?.temperature_2m_mean)throw Error('Klimatický normál nemá denní teploty');
     const sums={},counts={};
-    j.daily.time.forEach((date,i)=>{
-      const temp=j.daily.temperature_2m_mean[i];if(!Number.isFinite(temp))return;
-      const key=date.slice(5),gdd=Math.max(0,temp-5);
-      sums[key]=(sums[key]||0)+gdd;counts[key]=(counts[key]||0)+1;
-    });
+    j.daily.time.forEach((date,i)=>{const temp=j.daily.temperature_2m_mean[i];if(!Number.isFinite(temp))return;const key=date.slice(5),gdd=Math.max(0,temp-5);sums[key]=(sums[key]||0)+gdd;counts[key]=(counts[key]||0)+1;});
     const normals={};Object.keys(sums).forEach(k=>normals[k]=sums[k]/counts[k]);
     try{localStorage.setItem(CLIMATE_CACHE,JSON.stringify({savedAt:Date.now(),data:normals}));}catch(e){console.warn('Uložení klimatického normálu:',e);}
     return normals;
@@ -111,17 +103,17 @@
     const normals=await getClimateNormals(),now=new Date(),month=now.getMonth()+1;
     if(month<2||month>7)return{available:true,shift:0,delta:0,normal:false,note:'Teplotní posun se vyhodnocuje v předjarním a jarním období (únor–červenec).'};
     const cutoff=new Date(now);cutoff.setDate(cutoff.getDate()-1);
+    const cutoffISO=`${cutoff.getFullYear()}-${String(cutoff.getMonth()+1).padStart(2,'0')}-${String(cutoff.getDate()).padStart(2,'0')}`;
     const rows=daily.time.map((date,i)=>({date,temp:daily.temperature_2m_mean[i]}))
-      .filter(x=>x.date&&x.date<=cutoff.toISOString().slice(0,10)&&Number.isFinite(x.temp)).slice(-30);
+      .filter(x=>x.date&&x.date<=cutoffISO&&Number.isFinite(x.temp)).slice(-30);
     if(rows.length<20)throw Error('Není dostatek posledních denních teplot');
     let delta=0,normalDaily=0,used=0;
-    rows.forEach(x=>{
-      const key=x.date.slice(5),normal=normals[key];if(!Number.isFinite(normal))return;
-      delta+=Math.max(0,x.temp-5)-normal;normalDaily+=normal;used++;
-    });
+    rows.forEach(x=>{const key=x.date.slice(5),normal=normals[key];if(!Number.isFinite(normal))return;delta+=Math.max(0,x.temp-5)-normal;normalDaily+=normal;used++;});
     if(used<20)throw Error('Klimatický normál nemá dostatečné pokrytí');
     const averageNormal=normalDaily/used;
-    const shift=Math.max(-10,Math.min(10,Math.round(-delta/Math.max(.75,averageNormal))));
+    // Kladná odchylka teplotní sumy znamená rychlejší vývoj a dřívější kvetení.
+    // Záporná odchylka znamená pomalejší vývoj a pozdější kvetení.
+    const shift=Math.max(-10,Math.min(10,Math.round(delta/Math.max(.75,averageNormal))));
     return{available:true,shift,delta:Number(delta.toFixed(1)),normal:true,days:used,note:shift>0?'Teplotní průběh ukazuje na možný dřívější nástup kvetení.':shift<0?'Teplotní průběh ukazuje na možné opoždění kvetení.':'Teplotní průběh je blízko dlouhodobému normálu.'};
   }
   async function getNdvi(){const r=await fetch('./data/ndvi-latest.json',{cache:'no-store'});if(!r.ok)throw Error('NDVI není dostupné');const j=await r.json();if(j.status!=='OK'||!j.rings)throw Error('Neplatný formát NDVI');return j;}
@@ -156,28 +148,24 @@
   function ndviInfo(data,r){const a=data?.rings?.[String(r)]||[],v=a.map(x=>({date:x.interval?.to,mean:x.outputs?.ndvi?.bands?.B0?.stats?.mean})).filter(x=>x.date&&Number.isFinite(x.mean));if(!v.length)return null;const last=v[v.length-1],prev=v.length>1?v[v.length-2]:null;return{...last,change:prev?last.mean-prev.mean:null};}
   function futureWeatherIndices(d){
     if(!d?.time?.length)return[];
-    const today=new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Prague'});
-    return d.time.map((date,i)=>({date,i})).filter(x=>x.date>=today).map(x=>x.i);
+    const now=new Date();
+    const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Prague',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now);
+    const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));
+    const today=`${p.year}-${p.month}-${p.day}`;
+    return d.time.map((date,i)=>({date,i})).filter(x=>x.date>=today).map(x=>x.i).slice(0,7);
   }
   function flightStatus(w,index){const d=w?.daily;if(!d?.time?.length||index==null)return'Budoucí předpověď není dostupná';const t=d.temperature_2m_max?.[index],rain=d.precipitation_sum?.[index],wind=d.wind_speed_10m_max?.[index];if(t==null||rain==null||wind==null)return'Neúplné údaje';if(t<10)return'Chladno – omezený let';if(rain>=2)return'Déšť může omezit let';if(wind>=30)return'Silný vítr';if(t>=15&&rain<1&&wind<20)return'Příznivé podmínky pro let';return'Proměnlivé podmínky';}
 
   function renderCalendar(panel,signal){
     const cal=bloomCalendar(signal);panel.append($('h3','🌸 Kalendář kvetení dřevin a keřů'));
     panel.append($('p','Orientační fenologický kalendář pro oblast Oseka. Zobrazuje obvyklá období upravená podle teplotního průběhu; nejde o potvrzený výskyt konkrétního druhu na jednotlivých pozemcích.','muted'));
-    if(signal?.available){
-      panel.append($('div',signal.normal?'Teplotní vliv za posledních 30 dní: '+(signal.shift>0?'posun přibližně o '+signal.shift+' dní dříve':signal.shift<0?'posun přibližně o '+Math.abs(signal.shift)+' dní později':'bez významného posunu')+'. '+signal.note:signal.note,'notice'));
-    }else{
-      panel.append($('div','Teplotní úprava není dostupná; zobrazuji základní kalendář. '+(signal?.error||''),'notice'));
-    }
+    if(signal?.available){panel.append($('div',signal.normal?'Teplotní vliv za posledních 30 dní: '+(signal.shift>0?'posun přibližně o '+signal.shift+' dní dříve':signal.shift<0?'posun přibližně o '+Math.abs(signal.shift)+' dní později':'bez významného posunu')+'. '+signal.note:signal.note,'notice'));}
+    else panel.append($('div','Teplotní úprava není dostupná; zobrazuji základní kalendář. '+(signal?.error||''),'notice'));
     const add=(heading,items,empty)=>{panel.append($('h4',heading));if(!items.length){panel.append($('div',empty,'item'));return;}items.forEach(x=>{const row=$('div',undefined,'item');row.append($('b',x.name+' · '+dateLabel(x.start)+' – '+dateLabel(x.end)),$('div',x.kind),$('div',x.group+' – '+x.note,'muted'));panel.append(row);});};
     add('Pravděpodobné období právě nyní',cal.current,'V tomto měsíci není v kalendáři uveden hlavní druh.');
     add('Další druhy v následujících třech měsících',cal.next.filter(x=>!cal.current.includes(x)),'Žádné další druhy v nejbližším období.');
     panel.append($('h4','Roční přehled'));
-    cal.all.forEach(x=>{
-      const row=$('div',undefined,'item');
-      row.append($('b',x.name),$('div',dateLabel(x.start)+' až '+dateLabel(x.end)),$('div',x.kind,'muted'));
-      panel.append(row);
-    });
+    cal.all.forEach(x=>{const row=$('div',undefined,'item');row.append($('b',x.name),$('div',dateLabel(x.start)+' až '+dateLabel(x.end)),$('div',x.kind,'muted'));panel.append(row);});
     panel.append($('p','Skutečný začátek kvetení se může podle nadmořské výšky, odrůdy a průběhu počasí posunout i o několik týdnů. Teplotní a srážková předpověď je zobrazena níže samostatně; kalendář proto automaticky netvrdí, že rostlina právě kvete.','muted'));
   }
 
