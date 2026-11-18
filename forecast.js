@@ -7,7 +7,7 @@
   const SITE = { lat: 49.7804535, lon: 13.5998565 };
   const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
   const ZABAGED = 'https://ags.cuzk.gov.cz/arcgis/rest/services/ZABAGED_POLOHOPIS/MapServer';
-  const CACHE = 'vcelarOsek.forecast.v8';
+  const CACHE = 'vcelarOsek.forecast.v9';
   const CLIMATE_CACHE = 'vcelarOsek.phenologyClimate.v1';
   const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
   const DB_NAME = 'vcelarOsekDB', DB_STORE = 'appData', DB_KEY = 'vcelarOsek.data.v2';
@@ -63,6 +63,13 @@
   const monthName=m=>MONTHS[m-1];
   const dist=(a,b,c,d)=>{const r=x=>x*Math.PI/180,h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));};
   const rule=name=>RULES.find(x=>x.re.test(name))||null;
+  // Konkrétní plodinu bereme pouze z pole plodina/crop.
+  // Kultura (orná půda, TTP apod.) není název pěstované plodiny.
+  function explicitCrop(p){
+    const a=p?.attributes||{};
+    const value=p?.crop||a.plodina||a.PLODINA||a.crop||a.CROP||a.nazevPlodiny||a.NAZEV_PLODINY||'';
+    return String(value).trim();
+  }
 
   function points(g){const out=[];const walk=x=>{if(!Array.isArray(x))return;if(typeof x[0]==='number'&&typeof x[1]==='number')out.push(x);else x.forEach(walk);};if(g?.type==='GeometryCollection')(g.geometries||[]).forEach(x=>walk(x.coordinates));else walk(g?.coordinates);return out;}
   function centerPts(p){if(!p.length)return null;const xs=p.map(x=>x[0]),ys=p.map(x=>x[1]);return[(Math.min(...ys)+Math.max(...ys))/2,(Math.min(...xs)+Math.max(...xs))/2];}
@@ -77,8 +84,8 @@
   }
   async function getParcels(){
     try{const r=await fetch(GEOJSON,{cache:'no-store'});if(!r.ok)throw Error('LPIS export není dostupný');const j=await r.json();
-      return(j.features||[]).flatMap(f=>{const p=f.properties||{},name=String(p.plodina||'Plodina neuvedena'),c=centerPts(points(f.geometry));if(!c)return[];const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);return distance<=5.15?[{name,distance,area:Number(p.deklarovana_vymera_ha||p.dpb_vymera_ha||0),rule:rule(name)}]:[];});
-    }catch(e){console.warn('LPIS export:',e);const local=await readLocalParcels();return local.flatMap(p=>{const c=centerPts(points(p.geometry));if(!c)return[];const distance=dist(SITE.lat,SITE.lon,c[0],c[1]),name=String(p.crop||p.attributes?.plodina||p.culture||'Plodina neuvedena');return distance<=5.15?[{name,distance,area:Number(p.area||p.attributes?.vymera_ha||0),rule:rule(name)}]:[];});}
+      return(j.features||[]).flatMap(f=>{const p=f.properties||{},name=String(p.plodina||p.PLODINA||p.crop||p.CROP||''),c=centerPts(points(f.geometry));if(!c)return[];const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);return distance<=5.15?[{name:name||'Konkrétní plodina nezjištěna',culture:String(p.kultura||p.KULTURA||''),distance,area:Number(p.deklarovana_vymera_ha||p.dpb_vymera_ha||0),rule:name?rule(name):null}]:[];});
+    }catch(e){console.warn('LPIS export:',e);const local=await readLocalParcels();return local.flatMap(p=>{const c=centerPts(points(p.geometry));if(!c)return[];const distance=dist(SITE.lat,SITE.lon,c[0],c[1]),name=explicitCrop(p);return distance<=5.15?[{name:name||'Konkrétní plodina nezjištěna',culture:String(p.culture||p.attributes?.kultura||p.attributes?.KULTURA||''),distance,area:Number(p.area||p.attributes?.vymera_ha||p.attributes?.VYMERA_HA||0),rule:name?rule(name):null}]:[];});}
   }
   function envelope(){const dy=5.25/111.32,dx=5.25/(111.32*Math.cos(SITE.lat*Math.PI/180));return{xmin:SITE.lon-dx,ymin:SITE.lat-dy,xmax:SITE.lon+dx,ymax:SITE.lat+dy};}
   async function getLayer(id){const u=new URL(`${ZABAGED}/${id}/query`),p={f:'json',where:'1=1',outFields:'*',returnGeometry:'true',geometry:JSON.stringify(envelope()),geometryType:'esriGeometryEnvelope',inSR:'4326',spatialRel:'esriSpatialRelIntersects',outSR:'4326',resultRecordCount:'2000'};Object.entries(p).forEach(([k,v])=>u.searchParams.set(k,v));const r=await fetch(u,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error)throw Error(j.error.message||'Chyba ZABAGED');return j.features||[];}
@@ -207,7 +214,18 @@
       estimates.forEach(x=>{const date=new Date(d.time[x.i]+'T12:00:00');panel.append($('div',date.toLocaleDateString('cs-CZ')+' · '+x.level+' · let '+x.flight.score+'/100'+(x.items.length?' · možné zdroje: '+x.items.slice(0,4).join(', '):' · bez určeného aktivního zdroje'),'item'));});
     } else panel.append($('div','Odhad není dostupný bez denní předpovědi počasí.','item'));
 
-    panel.append($('h3','Přehled evidovaných plodin podle vzdálenosti'));RINGS.forEach(r=>{const a=data.parcels.filter(p=>p.distance<=r),area=a.reduce((s,p)=>s+p.area,0);panel.append($('div','Do '+r+' km · '+a.length+' záznamů plodin · '+round(area)+' ha','item'));});
+    panel.append($('h3','🌾 Konkrétní plodiny z evidence LPIS'));
+    const known=data.parcels.filter(p=>p.name&&p.name!=='Konkrétní plodina nezjištěna');
+    const unknown=data.parcels.filter(p=>!p.name||p.name==='Konkrétní plodina nezjištěna');
+    if(known.length){
+      const cropGroups=new Map();
+      known.forEach(p=>{const k=p.name;if(!cropGroups.has(k))cropGroups.set(k,{area:0,count:0,rule:p.rule});const x=cropGroups.get(k);x.area+=p.area||0;x.count++;});
+      [...cropGroups.entries()].sort((a,b)=>b[1].area-a[1].area).forEach(([name,x])=>panel.append($('div',name+' · '+x.count+' pozemků · '+round(x.area)+' ha · '+(x.rule?'období kvetení v modelu evidováno':'bez přiřazeného období kvetení'),'item')));
+    }else panel.append($('div','V aktuálně načtených LPIS záznamech není vyplněn konkrétní druh plodiny.','item'));
+    panel.append($('div','Pozemky bez konkrétní plodiny: '+unknown.length+' záznamů · '+round(unknown.reduce((s,p)=>s+(p.area||0),0))+' ha. Jejich výměra je evidována, ale nelze ji poctivě přiřadit řepce, jeteli ani jiné plodině.','notice'));
+    const cultures=new Map();data.parcels.forEach(p=>{const k=p.culture||'Kultura neuvedena';cultures.set(k,(cultures.get(k)||0)+1);});
+    if(cultures.size)panel.append($('p','Druhy evidované kultury pozemků: '+[...cultures.entries()].map(([k,v])=>k+' ('+v+')').join(', ')+'. Kultura pozemku není totéž co aktuálně pěstovaná plodina.','muted'));
+    panel.append($('h3','Přehled evidovaných pozemků podle vzdálenosti'));RINGS.forEach(r=>{const a=data.parcels.filter(p=>p.distance<=r),area=a.reduce((s,p)=>s+p.area,0),withCrop=a.filter(p=>p.name&&p.name!=='Konkrétní plodina nezjištěna').length;panel.append($('div','Do '+r+' km · '+a.length+' pozemků · '+round(area)+' ha · konkrétní plodina uvedena u '+withCrop,'item'));});
     const btn=$('button','Aktualizovat prognózu','btn primary');btn.type='button';btn.addEventListener('click',()=>update(target));panel.append(btn);target.append(panel);
   }
   async function update(target){
