@@ -1,8 +1,4 @@
-/* Včelař – Osek | sjednocení rozměrů formulářových polí
-   Datumová pole jsou výslovně omezena na stejnou šířku jako ostatní pole,
-   včetně vnitřního ovládacího prvku Safari na iPhonu.
-*/
-
+/* Včelař – Osek | sjednocení rozměrů formulářových polí */
 input:not([type="hidden"]),
 select,
 textarea {
@@ -26,14 +22,14 @@ select {
   line-height: normal;
 }
 
-/* Safari / iOS: datum nesmí přetékat přes šířku sloupce. */
 input[type="date"] {
   -webkit-appearance: none;
   appearance: none;
-  inline-size: 100%;
-  max-inline-size: 100%;
-  min-inline-size: 0;
-  padding-inline: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 8px;
   overflow: hidden;
 }
 
@@ -59,9 +55,17 @@ textarea:focus {
   outline-offset: 1px;
 }
 
-/* Zabrání roztažení prvků uvnitř mřížky formulářů. */
 .grid > *,
 .field {
   min-width: 0;
   max-width: 100%;
+}
+
+/* iPhone Safari vykresluje date input širší než jeho CSS box.
+   Vizuální zúžení dorovná jeho pravý okraj s ostatními poli. */
+@media (max-width: 700px) {
+  input[type="date"] {
+    transform: scaleX(.93);
+    transform-origin: left center;
+  }
 }
