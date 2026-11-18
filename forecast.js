@@ -168,7 +168,7 @@
     add('Pravděpodobné období právě nyní',cal.current,'V tomto měsíci není v kalendáři uveden hlavní druh.');
     add('Další druhy v následujících třech měsících',cal.next.filter(x=>!cal.current.includes(x)),'Žádné další druhy v nejbližším období.');
     panel.append($('h4','Roční přehled'));
-    BLOOMS.forEach(x=>{
+    cal.all.forEach(x=>{
       const row=$('div',undefined,'item');
       row.append($('b',x.name),$('div',dateLabel(x.start)+' až '+dateLabel(x.end)),$('div',x.kind,'muted'));
       panel.append(row);
