@@ -1,5 +1,16 @@
-const CACHE='vcelar-osek-v7';
-const FILES=['./','./index.html','./app.js','./map.js','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png'];
+const CACHE='vcelar-osek-v8';
+const FILES=[
+  './',
+  './index.html',
+  './app.js',
+  './app.bundle.js',
+  './map.js',
+  './forecast.js',
+  './manifest.webmanifest',
+  './icon.svg',
+  './icon-192.png',
+  './icon-512.png'
+];
 
 self.addEventListener('install',event=>{
   event.waitUntil(
