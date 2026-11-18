@@ -1,4 +1,4 @@
-/* Včelař – Osek | sjednocení rozměrů formulářových polí */
+/* Včelař – Osek | oprava šířky datumových polí na iPhone */
 input:not([type="hidden"]),
 select,
 textarea {
@@ -22,13 +22,16 @@ select {
   line-height: normal;
 }
 
+/* iOS Safari: nativní date input opticky přetéká doprava.
+   Na mobilu proto zmenšíme jeho skutečnou šířku o 54 px.
+   Ostatní pole zůstávají beze změny. */
 input[type="date"] {
   -webkit-appearance: none;
   appearance: none;
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
   padding: 0 8px;
   overflow: hidden;
 }
@@ -61,11 +64,10 @@ textarea:focus {
   max-width: 100%;
 }
 
-/* iPhone Safari vykresluje date input širší než jeho CSS box.
-   Vizuální zúžení dorovná jeho pravý okraj s ostatními poli. */
 @media (max-width: 700px) {
   input[type="date"] {
-    transform: scaleX(.93);
-    transform-origin: left center;
+    width: calc(100% - 54px) !important;
+    max-width: calc(100% - 54px) !important;
+    margin-right: 54px;
   }
 }
