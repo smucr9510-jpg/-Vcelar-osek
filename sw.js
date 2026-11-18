@@ -1,4 +1,4 @@
-const CACHE='vcelar-osek-v11';
+const CACHE='vcelar-osek-v12';
 const FILES=[
   './',
   './index.html',
@@ -7,6 +7,7 @@ const FILES=[
   './map.js',
   './forecast.js',
   './fields.css',
+  './sw.js',
   './manifest.webmanifest',
   './icon.svg',
   './icon-192.png',
