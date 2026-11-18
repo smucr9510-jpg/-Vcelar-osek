@@ -40,8 +40,34 @@ function wfsStatus(msg,bad=false){$('wfsStatus').className='notice'+(bad?' bad':
 function endpoint(){return $('wfsUrl').value.trim().replace(/\?+$/,'')}
 function geometryCenter(g){const pts=[];const walk=v=>{if(!Array.isArray(v))return;if(v.length>=2&&typeof v[0]==='number'&&typeof v[1]==='number'){pts.push(v);return}v.forEach(walk)};if(g?.type==='GeometryCollection')(g.geometries||[]).forEach(x=>walk(x.coordinates));else walk(g?.coordinates);if(!pts.length)return null;const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);return [(Math.min(...ys)+Math.max(...ys))/2,(Math.min(...xs)+Math.max(...xs))/2]}
 function distance(a,b,c,d){const r=x=>x*Math.PI/180,h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h))}
+
+/* Bezpečné doplnění vzdálenosti: mění pouze prázdné hodnoty u pozemků s geometrií.
+   Existující ruční hodnoty, geometrie, atributy a ostatní pole se nemění. */
+function fillMissingParcelDistances(){
+ let updated=0,withoutGeometry=0,invalidGeometry=0;
+ for(const parcel of db.parcels){
+  if(!parcel||String(parcel.dist??'').trim()!=='')continue;
+  if(!parcel.geometry){withoutGeometry++;continue}
+  const center=geometryCenter(parcel.geometry);
+  if(!center||!Number.isFinite(center[0])||!Number.isFinite(center[1])||
+     Math.abs(center[0])>90||Math.abs(center[1])>180){
+    invalidGeometry++;continue;
+  }
+  const km=distance(SITE.lat,SITE.lon,center[0],center[1]);
+  if(!Number.isFinite(km)) {invalidGeometry++;continue}
+  parcel.dist=km.toFixed(2);
+  updated++;
+ }
+ return {updated,withoutGeometry,invalidGeometry};
+}
+
 async function init(){
  db=await readDB();
+ const distanceRepair=fillMissingParcelDistances();
+ if(distanceRepair.updated){
+  db.updated=new Date().toISOString();
+  await writeDB(structuredClone(db));
+ }
  $('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-page]');if(b)page(b.dataset.page)});
  $('newColony').onclick=clearColony;$('cancelColony').onclick=clearColony;
  $('colonyList').onclick=e=>{const b=e.target.closest('[data-edit-col]');if(!b)return;const c=db.colonies.find(x=>x.id===b.dataset.editCol);if(!c)return;$('colId').value=c.id;$('colName').value=c.name;$('colType').value=c.type;$('colDate').value=c.date;$('colState').value=c.state;$('colNotes').value=c.notes;page('colonies')};
@@ -66,5 +92,9 @@ async function init(){
  function net(){const on=navigator.onLine;$('net').textContent=on?'Aplikace připravena · online':'Offline režim · data v telefonu';$('net').classList.toggle('no',!on)}window.addEventListener('online',net);window.addEventListener('offline',net);net();
  if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
  renderAll();
+ if(distanceRepair.updated){
+  const missing=db.parcels.filter(p=>p&&String(p.dist??'').trim()===''&&p.geometry).length;
+  wfsStatus('Automaticky doplněna vzdálenost u '+distanceRepair.updated+' pozemků. Bez geometrie: '+distanceRepair.withoutGeometry+'; neplatná geometrie: '+distanceRepair.invalidGeometry+'. Ručně vyplněné vzdálenosti zůstaly beze změny.');
+ }
 }
 init().catch(e=>{console.error(e);alert('Aplikaci se nepodařilo spustit: '+(e.message||e))});
