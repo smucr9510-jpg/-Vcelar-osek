@@ -50,9 +50,20 @@ jobs:
               raise SystemExit("V archivním index.html nebylo nalezeno očekávané SVG.")
           PY
 
-          # Přepsat archivní index aktuálním indexem z kořene repozitáře.
+          # Přepsat archivní index a JavaScript aktuálními soubory z kořene.
           cp index.html source/index.html
           cp app.js source/app.js
+
+          # Vždy použít aktuální CSS z kořene repozitáře, nikoli starou verzi ZIP.
+          if [ ! -f fields.css ]; then
+            echo "Chyba: V kořeni repozitáře chybí fields.css."
+            exit 1
+          fi
+          cp fields.css source/fields.css
+          if ! cmp -s fields.css source/fields.css; then
+            echo "Chyba: fields.css nebyl správně zkopírován."
+            exit 1
+          fi
 
           # Pokud je databáze prázdná, doplnit čtyři výchozí úly.
           # Existující včelstva, kontroly, pastva i pozemky zůstávají beze změny.
@@ -142,7 +153,7 @@ jobs:
                 stage='čtení GeoJSON odpovědi LPIS';
                 const payload=await response.json();
                 if(payload.type==='ExceptionReport'||payload.exceptions){
-                  throw Error('LPIS vrátil chybu: '+JSON.stringify(payload).slice(0,500));
+                  throw Error('LPIS vrátilo chybu: '+JSON.stringify(payload).slice(0,500));
                 }
                 const features=Array.isArray(payload.features)?payload.features:[];
                 if(total===null){
@@ -252,7 +263,7 @@ jobs:
           if count != 1:
               raise SystemExit("V souboru public/sw.js nebyl nalezen řádek CACHE.")
           old = "'./icon-512.png']"
-          new = "'./icon-512.png','./forecast.js','./data/ndvi-latest.json','./crops/plodiny_lpis_2026_osek_5km.geojson']"
+          new = "'./icon-512.png','./fields.css','./forecast.js','./data/ndvi-latest.json','./crops/plodiny_lpis_2026_osek_5km.geojson']"
           if old not in s:
               raise SystemExit("Nenalezen seznam souborů offline cache")
           s = s.replace(old, new, 1)
@@ -266,6 +277,12 @@ jobs:
               raise SystemExit("Ve service workeru nebyl nalezen fetch handler.")
           p.write_text("\n".join(lines) + "\n")
           PY
+
+          # Kontrola výsledku: nasazovaná aplikace musí obsahovat aktuální CSS.
+          if ! cmp -s fields.css public/fields.css; then
+            echo "Chyba: Ve výsledné složce public není aktuální fields.css."
+            exit 1
+          fi
 
           touch public/.nojekyll
 
