@@ -36,8 +36,10 @@ function renderDistanceStatus(){
  const missing=db.parcels.filter(p=>p&&String(p.dist??'').trim()===''&&p.geometry).length;
  const noGeometry=db.parcels.filter(p=>p&&String(p.dist??'').trim()===''&&!p.geometry).length;
  let msg='';
- if(report){
-  msg='Poslední doplnění: '+report.updated+' pozemků ('+new Date(report.at).toLocaleString('cs-CZ')+'). Bez geometrie při kontrole: '+report.withoutGeometry+'; neplatná geometrie: '+report.invalidGeometry+'.';
+ if(report&&report.previousRunUnknown){
+  msg='Při této kontrole nebylo nutné doplnit další vzdálenosti. Přesný počet doplněný při prvním spuštění předchozí verze se bohužel neuložil. Bez geometrie při této kontrole: '+report.withoutGeometry+'; neplatná geometrie: '+report.invalidGeometry+'.';
+ }else if(report){
+  msg='Při posledním spuštění nově doplněna vzdálenost u '+report.updated+' pozemků ('+new Date(report.at).toLocaleString('cs-CZ')+'). Bez geometrie při kontrole: '+report.withoutGeometry+'; neplatná geometrie: '+report.invalidGeometry+'.';
  }else{
   msg='Kontrola vzdáleností proběhla. Přesný počet doplněný při předchozím spuštění se bohužel neuložil.';
  }
