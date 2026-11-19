@@ -1,4 +1,4 @@
-const CACHE='vcelar-osek-v16';
+const CACHE='vcelar-osek-v17';
 const FILES=['./','./index.html','./app.js','./map.js','./forecast.js','./fields.css','./sw.js','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)).then(()=>self.skipWaiting()));
