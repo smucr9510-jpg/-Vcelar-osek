@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 15 | Prognóza pokračuje i při výpadku počasí.
+   Verze: 16 | Diagnostika skutečné chyby načítání prognózy.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -395,7 +395,16 @@
       ]);
       let phenology;try{phenology=await getPhenologySignal(weather);}catch(e){console.warn('Teplotní prognóza kvetení:',e);phenology={available:false,error:'Teplotní data nebo dlouhodobý normál se nepodařilo načíst.'};}
       const data={updated:new Date().toISOString(),parcels,landscape,weather,ndvi,phenology};save(data);render(target,data,false);
-    }catch(e){console.warn('Prognóza pastvy:',e);const old=cached();if(old)render(target,old,true);else target.replaceChildren($('div','Prognóza není dostupná. Zkontrolujte připojení a zkuste aktualizaci.','notice warn'));}
+    }catch(e){
+      console.error('Prognóza pastvy – přesná chyba:',e,e?.stack);
+      const old=cached();
+      if(old){
+        try{render(target,old,true);target.prepend($('div','Aktualizace selhala: '+String(e?.message||e),'notice warn'));}
+        catch(renderError){console.error('Chyba vykreslení uložené prognózy:',renderError);target.replaceChildren($('div','Chyba prognózy: '+String(e?.message||e)+' | Chyba zobrazení: '+String(renderError?.message||renderError),'notice warn'));}
+      }else{
+        target.replaceChildren($('div','Prognózu se nepodařilo načíst. Technická chyba: '+String(e?.message||e),'notice warn'));
+      }
+    }
   }
   function start(){const forage=document.getElementById('forage');if(!forage||document.getElementById('forecastPanel'))return;const target=$('div');target.id='forecastPanel';forage.insertBefore(target,forage.firstChild);const old=cached();if(old)render(target,old,true);else target.append($('div','Prognóza se načte při připojení k internetu.','notice'));update(target);}
   window.VcelarForecast={update,getCache:cached};
