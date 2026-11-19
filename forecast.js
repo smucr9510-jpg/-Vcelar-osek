@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 16 | Diagnostika skutečné chyby načítání prognózy.
+   Verze: 17 | Opravený výpočet středu GeoJSON pozemků.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -62,6 +62,21 @@
   const active=(x,m)=>x.from<=x.to?m>=x.from&&m<=x.to:m>=x.from||m<=x.to;
   const monthName=m=>MONTHS[m-1];
   const dist=(a,b,c,d)=>{const r=x=>x*Math.PI/180,h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));};
+  // Bezpečný střed GeoJSON geometrie; funguje pro Polygon, MultiPolygon i Feature.
+  function geoCenter(input){
+    const geometry=input?.type==='Feature'?input.geometry:input;
+    const coordinates=geometry?.coordinates;
+    if(!coordinates)return null;
+    let lon=0,lat=0,count=0;
+    const walk=value=>{
+      if(!Array.isArray(value))return;
+      if(value.length>=2&&typeof value[0]==='number'&&typeof value[1]==='number'){
+        lon+=value[0];lat+=value[1];count++;
+      }else value.forEach(walk);
+    };
+    walk(coordinates);
+    return count?[lat/count,lon/count]:null;
+  }
   const rule=name=>RULES.find(x=>x.re.test(name))||null;
   // Plodinu čteme z deklarací GPZ i z kompatibilních polí exportu.
   // Kultura DPB (např. orná půda/TTP) se nikdy nepovažuje za plodinu.
@@ -92,7 +107,7 @@
     return numericArea(declaration?.area)||numericArea(declaration?.DEKL_VYM)||parcelArea(p);
   }
   function localParcelFeatures(p){
-    const c=centerPts(points(p?.geometry));
+    const c=geoCenter(p?.geometry);
     if(!c)return[];
     const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);
     if(distance>5.15)return[];
@@ -121,7 +136,7 @@
       if(!r.ok)throw Error('LPIS export není dostupný');
       const j=await r.json();
       return(j.features||[]).flatMap(f=>{
-        const p=f.properties||{},c=centerPts(points(f.geometry));
+        const p=f.properties||{},c=geoCenter(f.geometry);
         if(!c)return[];
         const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);
         if(distance>5.15)return[];
