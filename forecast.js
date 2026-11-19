@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 12 | Karty plodin a opravené přepočítání velikosti mapy.
+   Verze: 14 | Deklarace plodin GPZ a kultura LPIS zpracované samostatně.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -63,19 +63,52 @@
   const monthName=m=>MONTHS[m-1];
   const dist=(a,b,c,d)=>{const r=x=>x*Math.PI/180,h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));};
   const rule=name=>RULES.find(x=>x.re.test(name))||null;
-  // Konkrétní plodinu bereme pouze z pole plodina/crop.
-  // Kultura (orná půda, TTP apod.) není název pěstované plodiny.
-  function explicitCrop(p){
+  // Plodinu čteme z deklarací GPZ i z kompatibilních polí exportu.
+  // Kultura DPB (např. orná půda/TTP) se nikdy nepovažuje za plodinu.
+  function cropNames(p){
     const a=p?.attributes||{};
-    const value=p?.crop||a.plodina||a.PLODINA||a.crop||a.CROP||a.nazevPlodiny||a.NAZEV_PLODINY||'';
-    return String(value).trim();
+    const declarations=Array.isArray(p?.cropDeclarations)?p.cropDeclarations:[];
+    const fromDeclarations=declarations
+      .map(x=>String(x?.plant||x?.PLOD_NAZE||'').trim())
+      .filter(Boolean);
+    if(fromDeclarations.length)return [...new Set(fromDeclarations)];
+    const value=p?.crop||p?.plodina||a.PLOD_NAZE||a.plodina||a.PLODINA||a.crop||a.CROP||a.nazevPlodiny||a.NAZEV_PLODINY||'';
+    return String(value).split(/[;,|]/).map(x=>x.trim()).filter(Boolean);
   }
-
-  function points(g){const out=[];const walk=x=>{if(!Array.isArray(x))return;if(typeof x[0]==='number'&&typeof x[1]==='number')out.push(x);else x.forEach(walk);};if(g?.type==='GeometryCollection')(g.geometries||[]).forEach(x=>walk(x.coordinates));else walk(g?.coordinates);return out;}
-  function centerPts(p){if(!p.length)return null;const xs=p.map(x=>x[0]),ys=p.map(x=>x[1]);return[(Math.min(...ys)+Math.max(...ys))/2,(Math.min(...xs)+Math.max(...xs))/2];}
-  function arcCenter(g){if(!g)return null;if(Number.isFinite(g.x)&&Number.isFinite(g.y))return[g.y,g.x];const p=[];(g.rings||g.paths||[]).forEach(line=>line.forEach(x=>{if(Array.isArray(x)&&Number.isFinite(x[0])&&Number.isFinite(x[1]))p.push(x);}));return centerPts(p);}
-  function arcArea(f){const a=Number(f?.attributes?.Shape_Area??f?.attributes?.shape_area);if(a>0)return a;const ring=f?.geometry?.rings?.[0];if(!ring)return 0;let s=0;for(let i=0,j=ring.length-1;i<ring.length;j=i++)s+=ring[j][0]*ring[i][1]-ring[i][0]*ring[j][1];return Math.abs(s/2);}
-
+  function cultureName(p){
+    const a=p?.attributes||{};
+    return String(p?.culture||p?.kultura||a.kultura||a.KULTURA||a.KULTURAKOD||'').trim();
+  }
+  function numericArea(value){
+    if(typeof value==='number')return Number.isFinite(value)?value:0;
+    const n=Number(String(value??'').trim().replace(/\s/g,'').replace(',','.'));
+    return Number.isFinite(n)?n:0;
+  }
+  function parcelArea(p){
+    const a=p?.attributes||{};
+    return numericArea(p?.area)||numericArea(p?.vymera)||numericArea(a.vymera)||numericArea(a.VYMERA_HA)||numericArea(a.DPB_VYMERA)||0;
+  }
+  function declarationArea(declaration,p){
+    return numericArea(declaration?.area)||numericArea(declaration?.DEKL_VYM)||parcelArea(p);
+  }
+  function localParcelFeatures(p){
+    const c=centerPts(points(p?.geometry));
+    if(!c)return[];
+    const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);
+    if(distance>5.15)return[];
+    const declarations=Array.isArray(p?.cropDeclarations)?p.cropDeclarations:[];
+    const culture=cultureName(p);
+    if(declarations.length){
+      return declarations.flatMap(declaration=>{
+        const name=String(declaration?.plant||declaration?.PLOD_NAZE||'').trim();
+        if(!name)return[];
+        return[{name,culture,distance,area:declarationArea(declaration,p),rule:rule(name),geometry:p.geometry,source:'Veřejný export MZe/SZIF – GPZ',year:declaration.year||p.cropDataYear||null}];
+      });
+    }
+    const names=cropNames(p);
+    if(names.length)return names.map(name=>({name,culture,distance,area:parcelArea(p),rule:rule(name),geometry:p.geometry,source:p.cropSource||'LPIS / deklarace plodiny',year:p.cropDataYear||null}));
+    return[{name:'Konkrétní plodina nezjištěna',culture,distance,area:parcelArea(p),rule:null,geometry:p.geometry,source:'LPIS – bez deklarace plodiny',year:null}];
+  }
   async function readLocalParcels(){
     if(!('indexedDB'in window))return[];
     try{const db=await new Promise((ok,no)=>{const r=indexedDB.open(DB_NAME,1);r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);});
@@ -83,9 +116,25 @@
     }catch(e){console.warn('Lokální LPIS:',e);return[];}
   }
   async function getParcels(){
-    try{const r=await fetch(GEOJSON,{cache:'no-store'});if(!r.ok)throw Error('LPIS export není dostupný');const j=await r.json();
-      return(j.features||[]).flatMap(f=>{const p=f.properties||{},name=String(p.plodina||p.PLODINA||p.crop||p.CROP||''),c=centerPts(points(f.geometry));if(!c)return[];const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);return distance<=5.15?[{name:name||'Konkrétní plodina nezjištěna',culture:String(p.kultura||p.KULTURA||''),distance,area:Number(p.deklarovana_vymera_ha||p.dpb_vymera_ha||0),rule:name?rule(name):null,geometry:f.geometry}]:[];});
-    }catch(e){console.warn('LPIS export:',e);const local=await readLocalParcels();return local.flatMap(p=>{const c=centerPts(points(p.geometry));if(!c)return[];const distance=dist(SITE.lat,SITE.lon,c[0],c[1]),name=explicitCrop(p);return distance<=5.15?[{name:name||'Konkrétní plodina nezjištěna',culture:String(p.culture||p.attributes?.kultura||p.attributes?.KULTURA||''),distance,area:Number(p.area||p.attributes?.vymera_ha||p.attributes?.VYMERA_HA||0),rule:name?rule(name):null,geometry:p.geometry}]:[];});}
+    try{
+      const r=await fetch(GEOJSON,{cache:'no-store'});
+      if(!r.ok)throw Error('LPIS export není dostupný');
+      const j=await r.json();
+      return(j.features||[]).flatMap(f=>{
+        const p=f.properties||{},c=centerPts(points(f.geometry));
+        if(!c)return[];
+        const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);
+        if(distance>5.15)return[];
+        const culture=cultureName(p);
+        const names=cropNames(p);
+        if(names.length)return names.map(name=>({name,culture,distance,area:parcelArea(p),rule:rule(name),geometry:f.geometry,source:'Veřejný export MZe/SZIF',year:p.rok||p.ROK||null}));
+        return[{name:'Konkrétní plodina nezjištěna',culture,distance,area:parcelArea(p),rule:null,geometry:f.geometry,source:'LPIS – bez deklarace plodiny',year:null}];
+      });
+    }catch(e){
+      console.warn('LPIS export:',e);
+      const local=await readLocalParcels();
+      return local.flatMap(localParcelFeatures);
+    }
   }
   function envelope(){const dy=5.25/111.32,dx=5.25/(111.32*Math.cos(SITE.lat*Math.PI/180));return{xmin:SITE.lon-dx,ymin:SITE.lat-dy,xmax:SITE.lon+dx,ymax:SITE.lat+dy};}
   async function getLayer(id){const u=new URL(`${ZABAGED}/${id}/query`),p={f:'json',where:'1=1',outFields:'*',returnGeometry:'true',geometry:JSON.stringify(envelope()),geometryType:'esriGeometryEnvelope',inSR:'4326',spatialRel:'esriSpatialRelIntersects',outSR:'4326',resultRecordCount:'2000'};Object.entries(p).forEach(([k,v])=>u.searchParams.set(k,v));const r=await fetch(u,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const j=await r.json();if(j.error)throw Error(j.error.message||'Chyba ZABAGED');return j.features||[];}
