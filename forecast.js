@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 17 | Opravený výpočet středu GeoJSON pozemků.
+   Verze: 18 | GPZ deklarace propojené s LPIS podle ID DPB.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -7,7 +7,7 @@
   const SITE = { lat: 49.7804535, lon: 13.5998565 };
   const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
   const ZABAGED = 'https://ags.cuzk.gov.cz/arcgis/rest/services/ZABAGED_POLOHOPIS/MapServer';
-  const CACHE = 'vcelarOsek.forecast.v12';
+  const CACHE = 'vcelarOsek.forecast.v13';
   const CLIMATE_CACHE = 'vcelarOsek.phenologyClimate.v1';
   const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
   const DB_NAME = 'vcelarOsekDB', DB_STORE = 'appData', DB_KEY = 'vcelarOsek.data.v2';
@@ -62,7 +62,7 @@
   const active=(x,m)=>x.from<=x.to?m>=x.from&&m<=x.to:m>=x.from||m<=x.to;
   const monthName=m=>MONTHS[m-1];
   const dist=(a,b,c,d)=>{const r=x=>x*Math.PI/180,h=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 6371*2*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));};
-  // Bezpečný střed GeoJSON geometrie; funguje pro Polygon, MultiPolygon i Feature.
+  // Střed geometrie GeoJSON pro Polygon, MultiPolygon i Feature.
   function geoCenter(input){
     const geometry=input?.type==='Feature'?input.geometry:input;
     const coordinates=geometry?.coordinates;
@@ -130,24 +130,75 @@
       const data=await new Promise((ok,no)=>{const r=db.transaction(DB_STORE,'readonly').objectStore(DB_STORE).get(DB_KEY);r.onsuccess=()=>ok(r.result||null);r.onerror=()=>no(r.error);});db.close();return Array.isArray(data?.parcels)?data.parcels:[];
     }catch(e){console.warn('Lokální LPIS:',e);return[];}
   }
+  function parcelIds(p){
+    const a=p?.attributes||{};
+    const ids=[
+      p?.sourceKey,p?.code,p?.id,p?.dpbId,p?.dpbID,
+      a.IdDiluPudnihoBloku,a.idDiluPudnihoBloku,a.idDpb,a.ID_DPB,
+      a.zkracenyKod,a.ZKRACENYKOD,a.KOD_DPB,a.kodDpb
+    ];
+    return [...new Set(ids.map(v=>String(v??'').replace(/^lpis:/i,'').trim()).filter(Boolean))];
+  }
   async function getParcels(){
+    // Lokální databázi čteme pouze režimem readonly; nic v ní neměníme.
+    const local=await readLocalParcels();
+    const localById=new Map();
+    local.forEach(p=>parcelIds(p).forEach(id=>localById.set(id,p)));
+    const matchedLocal=new Set();
     try{
       const r=await fetch(GEOJSON,{cache:'no-store'});
       if(!r.ok)throw Error('LPIS export není dostupný');
       const j=await r.json();
-      return(j.features||[]).flatMap(f=>{
+      const output=(j.features||[]).flatMap(f=>{
         const p=f.properties||{},c=geoCenter(f.geometry);
         if(!c)return[];
         const distance=dist(SITE.lat,SITE.lon,c[0],c[1]);
         if(distance>5.15)return[];
-        const culture=cultureName(p);
+        const ids=parcelIds({...p,geometry:f.geometry});
+        let localParcel=null;
+        for(const id of ids){
+          const candidate=localById.get(id);
+          if(candidate?.cropDeclarations?.length){localParcel=candidate;break;}
+        }
+        if(localParcel)matchedLocal.add(localParcel);
+        const declarations=Array.isArray(localParcel?.cropDeclarations)?localParcel.cropDeclarations:[];
+        const culture=cultureName(localParcel||p);
+        if(declarations.length){
+          return declarations.flatMap(declaration=>{
+            const name=String(declaration?.plant||declaration?.PLOD_NAZE||'').trim();
+            if(!name)return[];
+            return [{
+              name,culture,distance,
+              area:declarationArea(declaration,localParcel),
+              rule:rule(name),geometry:f.geometry,
+              source:'Veřejný export MZe/SZIF – GPZ',
+              year:declaration.year||localParcel.cropDataYear||null
+            }];
+          });
+        }
         const names=cropNames(p);
-        if(names.length)return names.map(name=>({name,culture,distance,area:parcelArea(p),rule:rule(name),geometry:f.geometry,source:'Veřejný export MZe/SZIF',year:p.rok||p.ROK||null}));
-        return[{name:'Konkrétní plodina nezjištěna',culture,distance,area:parcelArea(p),rule:null,geometry:f.geometry,source:'LPIS – bez deklarace plodiny',year:null}];
+        if(names.length){
+          const area=parcelArea(p)||(localParcel?parcelArea(localParcel):0);
+          return names.map(name=>({
+            name,culture,distance,area,rule:rule(name),geometry:f.geometry,
+            source:'Veřejný export MZe/SZIF',year:p.rok||p.ROK||null
+          }));
+        }
+        return [{
+          name:'Konkrétní plodina nezjištěna',culture,distance,
+          area:parcelArea(p)||(localParcel?parcelArea(localParcel):0),
+          rule:null,geometry:f.geometry,source:'LPIS – bez deklarace plodiny',year:null
+        }];
       });
+      // GPZ záznamy, které v mapovém GeoJSON nemají odpovídající prvek,
+      // doplníme z lokální geometrie a deklarované výměry.
+      local.forEach(p=>{
+        if(!p?.cropDeclarations?.length||matchedLocal.has(p))return;
+        output.push(...localParcelFeatures(p));
+      });
+      return output;
     }catch(e){
       console.warn('LPIS export:',e);
-      const local=await readLocalParcels();
       return local.flatMap(localParcelFeatures);
     }
   }
