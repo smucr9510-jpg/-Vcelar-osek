@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 14 | Deklarace plodin GPZ a kultura LPIS zpracované samostatně.
+   Verze: 15 | Prognóza pokračuje i při výpadku počasí.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -7,7 +7,7 @@
   const SITE = { lat: 49.7804535, lon: 13.5998565 };
   const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
   const ZABAGED = 'https://ags.cuzk.gov.cz/arcgis/rest/services/ZABAGED_POLOHOPIS/MapServer';
-  const CACHE = 'vcelarOsek.forecast.v11';
+  const CACHE = 'vcelarOsek.forecast.v12';
   const CLIMATE_CACHE = 'vcelarOsek.phenologyClimate.v1';
   const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
   const DB_NAME = 'vcelarOsekDB', DB_STORE = 'appData', DB_KEY = 'vcelarOsek.data.v2';
@@ -390,7 +390,8 @@
     try{
       const[parcels,landscape,weather,ndvi]=await Promise.all([
         getParcels(),getLandscape().catch(e=>{console.warn('ZABAGED:',e);return{features:[],layerStatus:[]};}),
-        getWeather(),getNdvi().catch(e=>{console.warn('NDVI:',e);return null;})
+        getWeather().catch(e=>{console.warn('Počasí není dostupné, pokračuji bez něj:',e);return null;}),
+        getNdvi().catch(e=>{console.warn('NDVI:',e);return null;})
       ]);
       let phenology;try{phenology=await getPhenologySignal(weather);}catch(e){console.warn('Teplotní prognóza kvetení:',e);phenology={available:false,error:'Teplotní data nebo dlouhodobý normál se nepodařilo načíst.'};}
       const data={updated:new Date().toISOString(),parcels,landscape,weather,ndvi,phenology};save(data);render(target,data,false);
