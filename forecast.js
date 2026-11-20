@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 21 | GPZ deklarace párované výhradně podle ID DPB.
+   Verze: 22 | GPZ deklarace párované výhradně podle ID DPB.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -7,7 +7,7 @@
   const SITE = { lat: 49.7804535, lon: 13.5998565 };
   const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
   const ZABAGED = 'https://ags.cuzk.gov.cz/arcgis/rest/services/ZABAGED_POLOHOPIS/MapServer';
-  const CACHE = 'vcelarOsek.forecast.v16';
+  const CACHE = 'vcelarOsek.forecast.v17';
   const CLIMATE_CACHE = 'vcelarOsek.phenologyClimate.v1';
   const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
   const DB_NAME = 'vcelarOsekDB', DB_STORE = 'appData', DB_KEY = 'vcelarOsek.data.v2';
@@ -125,10 +125,36 @@
     return[{name:'Konkrétní plodina nezjištěna',culture,distance,area:parcelArea(p),rule:null,geometry:p.geometry,source:'LPIS – bez deklarace plodiny',year:null}];
   }
   async function readLocalParcels(){
-    if(!('indexedDB'in window))return[];
-    try{const db=await new Promise((ok,no)=>{const r=indexedDB.open(DB_NAME,1);r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);});
-      const data=await new Promise((ok,no)=>{const r=db.transaction(DB_STORE,'readonly').objectStore(DB_STORE).get(DB_KEY);r.onsuccess=()=>ok(r.result||null);r.onerror=()=>no(r.error);});db.close();return Array.isArray(data?.parcels)?data.parcels:[];
-    }catch(e){console.warn('Lokální LPIS:',e);return[];}
+    if(!('indexedDB' in window))return[];
+    let db=null;
+    try{
+      // Otevřít existující DB bez vynucení verze. Čtení nesmí vyvolat upgrade ani zápis.
+      db=await new Promise((resolve,reject)=>{
+        const request=indexedDB.open(DB_NAME);
+        request.onsuccess=()=>resolve(request.result);
+        request.onerror=()=>reject(request.error||new Error('IndexedDB nelze otevřít'));
+        request.onblocked=()=>reject(new Error('Databáze je blokována jiným otevřeným oknem aplikace'));
+      });
+      if(!db.objectStoreNames.contains(DB_STORE)){
+        console.warn('Lokální LPIS: úložiště appData v databázi chybí; databáze nebyla změněna.');
+        return[];
+      }
+      const data=await new Promise((resolve,reject)=>{
+        const tx=db.transaction(DB_STORE,'readonly');
+        const request=tx.objectStore(DB_STORE).get(DB_KEY);
+        request.onsuccess=()=>resolve(request.result||null);
+        request.onerror=()=>reject(request.error||new Error('Čtení lokálních dat selhalo'));
+        tx.onabort=()=>reject(tx.error||new Error('Čtení IndexedDB bylo přerušeno'));
+      });
+      const parcels=Array.isArray(data?.parcels)?data.parcels:[];
+      if(!parcels.length)console.warn('Lokální LPIS: záznam v appData neobsahuje pole parcels.',data?Object.keys(data):'záznam nenalezen');
+      return parcels;
+    }catch(e){
+      console.warn('Lokální LPIS – čtení databáze:',e);
+      return[];
+    }finally{
+      if(db)try{db.close();}catch{}
+    }
   }
   // Identita DPB: nikdy nepoužívat zkrácený kód dílu (např. 5901/9).
   function dpbIdOf(p){
