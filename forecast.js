@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 19 | GPZ deklarace párované výhradně podle ID DPB.
+   Verze: 20 | GPZ deklarace párované výhradně podle ID DPB.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -7,7 +7,7 @@
   const SITE = { lat: 49.7804535, lon: 13.5998565 };
   const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
   const ZABAGED = 'https://ags.cuzk.gov.cz/arcgis/rest/services/ZABAGED_POLOHOPIS/MapServer';
-  const CACHE = 'vcelarOsek.forecast.v14';
+  const CACHE = 'vcelarOsek.forecast.v15';
   const CLIMATE_CACHE = 'vcelarOsek.phenologyClimate.v1';
   const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
   const DB_NAME = 'vcelarOsekDB', DB_STORE = 'appData', DB_KEY = 'vcelarOsek.data.v2';
@@ -117,11 +117,11 @@
       return declarations.flatMap(declaration=>{
         const name=String(declaration?.plant||declaration?.PLOD_NAZE||'').trim();
         if(!name)return[];
-        return[{name,culture,distance,area:declarationArea(declaration,p),rule:rule(name),geometry:p.geometry,source:'Veřejný export MZe/SZIF – GPZ',year:declaration.year||p.cropDataYear||null}];
+        return[{name,culture,distance,area:declarationArea(declaration,p),dpbId:declarationDpbId(declaration)||dpbIdOf(p),declarationKey:declarationSignature(declaration),rule:rule(name),geometry:p.geometry,source:'Veřejný export MZe/SZIF – GPZ',year:declaration.year||p.cropDataYear||null}];
       });
     }
     const names=cropNames(p);
-    if(names.length)return names.map(name=>({name,culture,distance,area:parcelArea(p),rule:rule(name),geometry:p.geometry,source:p.cropSource||'LPIS / deklarace plodiny',year:p.cropDataYear||null}));
+    if(names.length)return names.map(name=>({name,culture,distance,area:parcelArea(p),dpbId:dpbIdOf(p),declarationKey:[dpbIdOf(p),name,p.cropDataYear||''].join('|'),rule:rule(name),geometry:p.geometry,source:p.cropSource||'LPIS / deklarace plodiny',year:p.cropDataYear||null}));
     return[{name:'Konkrétní plodina nezjištěna',culture,distance,area:parcelArea(p),rule:null,geometry:p.geometry,source:'LPIS – bez deklarace plodiny',year:null}];
   }
   async function readLocalParcels(){
@@ -196,6 +196,8 @@
             return [{
               name,culture,distance,
               area:declarationArea(declaration,localParcel||p),
+              dpbId:featureId||declarationDpbId(declaration),
+              declarationKey:declarationSignature(declaration),
               rule:rule(name),geometry:f.geometry,
               source:'Veřejný export MZe/SZIF – GPZ',
               year:declaration.year||localParcel?.cropDataYear||null
@@ -206,7 +208,9 @@
         if(names.length){
           const area=parcelArea(p)||(localParcel?parcelArea(localParcel):0);
           return names.map(name=>({
-            name,culture,distance,area,rule:rule(name),geometry:f.geometry,
+            name,culture,distance,area,dpbId:featureId,
+            declarationKey:[featureId,name,p.rok||p.ROK||''].join('|'),
+            rule:rule(name),geometry:f.geometry,
             source:'Veřejný export MZe/SZIF',year:p.rok||p.ROK||null
           }));
         }
@@ -437,14 +441,28 @@
     const known=data.parcels.filter(p=>p.name&&p.name!=='Konkrétní plodina nezjištěna');
     const unknown=data.parcels.filter(p=>!p.name||p.name==='Konkrétní plodina nezjištěna');
     const cropGroups=new Map();
-    known.forEach(p=>{
+    known.forEach((p,index)=>{
       const k=p.name;
-      if(!cropGroups.has(k))cropGroups.set(k,{area:0,count:0,minDistance:Infinity,maxDistance:0,rule:p.rule||rule(k),features:[]});
-      const x=cropGroups.get(k);x.area+=p.area||0;x.count++;
+      if(!cropGroups.has(k))cropGroups.set(k,{
+        area:0,dpbIds:new Set(),declarationKeys:new Set(),geometryKeys:new Set(),
+        minDistance:Infinity,maxDistance:0,rule:p.rule||rule(k),features:[]
+      });
+      const x=cropGroups.get(k);
+      const dpb=String(p.dpbId||'').trim();
+      if(dpb)x.dpbIds.add(dpb);
+      const declarationKey=String(p.declarationKey||[dpb,k,p.year||'',p.area||'',index].join('|'));
+      if(!x.declarationKeys.has(declarationKey)){
+        x.declarationKeys.add(declarationKey);
+        x.area+=p.area||0;
+      }
       x.minDistance=Math.min(x.minDistance,Number(p.distance)||0);
       x.maxDistance=Math.max(x.maxDistance,Number(p.distance)||0);
       if(!x.rule&&p.rule)x.rule=p.rule;
-      if(p.geometry&&p.geometry.type)x.features.push(p);
+      if(p.geometry&&p.geometry.type){
+        const geometryKey=JSON.stringify(p.geometry);
+        x.geometryKeys.add(geometryKey);
+        if(!x.features.some(f=>JSON.stringify(f.geometry)===geometryKey))x.features.push(p);
+      }
     });
     const monthSpan=r=>r.from===r.to?monthName(r.from):monthName(r.from)+'–'+monthName(r.to);
     const importance=r=>!r?'neurčeno':r.score>=2.5?'významnější potenciál':r.score>=1.5?'střední potenciál':r.score>=.7?'nižší potenciál':'malý přímý přínos';
@@ -455,7 +473,9 @@
       heading.append($('strong',name),$('span',round(x.area)+' ha'));
       card.append(heading);
       const meta=$('div');meta.className='vcelar-crop-meta';
-      meta.append($('span',x.count+' pozemků'));
+      meta.append($('span',x.dpbIds.size+' jedinečných DPB'));
+      meta.append($('span',x.declarationKeys.size+' deklarací'));
+      meta.append($('span',x.geometryKeys.size+' mapových částí'));
       meta.append($('span',(Number.isFinite(x.minDistance)?x.minDistance.toFixed(2):'–')+' až '+x.maxDistance.toFixed(2)+' km od stanoviště'));
       card.append(meta);
       const bloom=$('div');bloom.className='vcelar-crop-detail';
