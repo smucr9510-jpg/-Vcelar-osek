@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 22 | GPZ deklarace párované výhradně podle ID DPB.
+   Verze: 23 | GPZ deklarace párované podle ID DPB; bezpečný fallback jen při jediném kódu pozemku.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -7,7 +7,7 @@
   const SITE = { lat: 49.7804535, lon: 13.5998565 };
   const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
   const ZABAGED = 'https://ags.cuzk.gov.cz/arcgis/rest/services/ZABAGED_POLOHOPIS/MapServer';
-  const CACHE = 'vcelarOsek.forecast.v17';
+  const CACHE = 'vcelarOsek.forecast.v18';
   const CLIMATE_CACHE = 'vcelarOsek.phenologyClimate.v1';
   const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
   const DB_NAME = 'vcelarOsekDB', DB_STORE = 'appData', DB_KEY = 'vcelarOsek.data.v2';
@@ -184,11 +184,17 @@
     // Lokální databázi čteme pouze režimem readonly; nic v ní neměníme.
     const local=await readLocalParcels();
     const localByDpb=new Map();
+    const localByCode=new Map();
     const declarationsByDpb=new Map();
     const declarationKeys=new Set();
     local.forEach(p=>{
       const id=dpbIdOf(p);
       if(id&&!localByDpb.has(id))localByDpb.set(id,p);
+      const code=String(p?.code||'').trim();
+      if(code){
+        if(!localByCode.has(code))localByCode.set(code,[]);
+        localByCode.get(code).push(p);
+      }
       (Array.isArray(p?.cropDeclarations)?p.cropDeclarations:[]).forEach(d=>{
         const dpb=declarationDpbId(d);
         if(!dpb)return;
@@ -246,7 +252,7 @@
           rule:null,geometry:f.geometry,source:'LPIS – bez deklarace plodiny',year:null
         }];
       });
-      // Nezobrazené DPB doplníme z lokální geometrie, stále jen podle plného ID DPB.
+      // Nezobrazené DPB doplníme nejprve podle plného ID DPB.
       local.forEach(p=>{
         const id=dpbIdOf(p);
         if(!id||matchedDpb.has(id))return;
@@ -255,14 +261,42 @@
         output.push(...localParcelFeatures(p,declarations));
         matchedDpb.add(id);
       });
+      // Nouzové dohledání osiřelých deklarací: pouze když přesné ID DPB
+      // nemá geometrii a kód pozemku ukazuje právě na jediný lokální polygon.
+      // Při více shodách se kód nikdy nepoužije, aby nedošlo k záměně DPB.
+      declarationsByDpb.forEach((declarations,id)=>{
+        if(matchedDpb.has(id)||!declarations.length)return;
+        const code=String(declarations[0]?.code||'').trim();
+        const candidates=code?(localByCode.get(code)||[]):[];
+        if(candidates.length!==1)return;
+        const candidate=candidates[0];
+        if(!geoCenter(candidate?.geometry))return;
+        output.push(...localParcelFeatures(candidate,declarations));
+        matchedDpb.add(id);
+      });
       return output;
     }catch(e){
       console.warn('LPIS export:',e);
-      return local.flatMap(p=>{
+      const output=[];
+      const matched=new Set();
+      local.forEach(p=>{
         const id=dpbIdOf(p);
         const declarations=id?(declarationsByDpb.get(id)||[]):[];
-        return localParcelFeatures(p,declarations);
+        if(declarations.length&&!matched.has(id)){
+          output.push(...localParcelFeatures(p,declarations));
+          matched.add(id);
+        }
       });
+      declarationsByDpb.forEach((declarations,id)=>{
+        if(matched.has(id)||!declarations.length)return;
+        const code=String(declarations[0]?.code||'').trim();
+        const candidates=code?(localByCode.get(code)||[]):[];
+        if(candidates.length===1){
+          output.push(...localParcelFeatures(candidates[0],declarations));
+          matched.add(id);
+        }
+      });
+      return output;
     }
   }
   function envelope(){const dy=5.25/111.32,dx=5.25/(111.32*Math.cos(SITE.lat*Math.PI/180));return{xmin:SITE.lon-dx,ymin:SITE.lat-dy,xmax:SITE.lon+dx,ymax:SITE.lat+dy};}
