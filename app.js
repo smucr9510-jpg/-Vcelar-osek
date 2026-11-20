@@ -8,6 +8,7 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const seed=()=>({colonies:[1,2,3,4].map(n=>({id:'seed'+n,name:'Úl '+n,type:'Adamec 11 rámků',date:'',state:'Aktivní',queenColor:'',strain:'',strainOther:'',notes:''})),checks:[],forage:[],parcels:[],harvests:[],updated:new Date().toISOString()});
 let db,saveQueue=Promise.resolve();
 let renderAll=()=>{};
+let parcelFormHome=null,parcelFormNext=null;
 function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(DB_STORE))r.result.createObjectStore(DB_STORE)};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error||Error('Nelze otevřít IndexedDB'))})}
 async function readDB(){
  const idb=await openDB();
@@ -41,7 +42,31 @@ function renderDistanceStatus(){
  msg+=' Nyní chybí vzdálenost u '+missing+' pozemků s geometrií a u '+noGeometry+' pozemků bez geometrie.';
  el.textContent=msg;
 }
-function renderParcels(){const q=$('parcelSearch').value.toLowerCase(),rows=db.parcels.filter(p=>JSON.stringify(p).toLowerCase().includes(q));$('parcelList').innerHTML=rows.map(p=>`<div class="item"><div><b>${esc(p.code||'Pozemek bez ID')}</b><div class="muted">${esc(p.crop||p.culture||'Plodina neznámá')} · ${p.area?esc(p.area)+' ha':'výměra neuvedena'} · ${p.dist?esc(p.dist)+' km od stanoviště':''}</div><span class="tag">${esc(p.status)}</span></div><button class="btn" data-edit-parcel="${esc(p.id)}">Karta</button></div>`).join('')||'<div class="empty">Evidence je prázdná. Pozemek přidejte ručně nebo načtěte z LPIS.</div>';renderDistanceStatus();document.dispatchEvent(new CustomEvent('vcelar:parcels-updated',{detail:{parcels:db.parcels}}))}
+function storedDistanceKm(value){
+ const n=Number(String(value??'').trim().replace(',','.'));
+ if(!Number.isFinite(n)||n<0)return null;
+ // LPIS records and new manual records are in km; older manual records may be metres.
+ return n>50?n/1000:n;
+}
+function formatParcelDistance(value){
+ const km=storedDistanceKm(value);if(km===null)return '';
+ const metres=km*1000;
+ return metres<1000?Math.round(metres)+' m':km.toLocaleString('cs-CZ',{maximumFractionDigits:2})+' km';
+}
+function renderParcels(){
+ const q=$('parcelSearch').value.toLowerCase();
+ // Return the form to its original location before rebuilding the list.
+ const form=$('parcelForm');
+ if(form&&parcelFormHome&&form.parentNode!==parcelFormHome){
+  if(parcelFormNext&&parcelFormNext.parentNode===parcelFormHome)parcelFormHome.insertBefore(form,parcelFormNext);
+  else parcelFormHome.appendChild(form);
+  form.classList.add('hidden');
+ }
+ const rows=db.parcels.filter(p=>JSON.stringify(p).toLowerCase().includes(q));
+ $('parcelList').innerHTML=rows.map(p=>`<div class="parcel-entry" data-parcel-entry="${esc(p.id)}"><div class="item"><div><b>${esc(p.code||'Pozemek bez ID')}</b><div class="muted">${esc(p.crop||p.culture||'Plodina neznámá')} · ${p.area?esc(p.area)+' ha':'výměra neuvedena'} · ${p.dist!==undefined&&p.dist!==null&&String(p.dist)!==''?esc(formatParcelDistance(p.dist)+' od stanoviště'):''}</div><span class="tag">${esc(p.status)}</span></div><button class="btn" type="button" data-edit-parcel="${esc(p.id)}">Karta</button></div></div>`).join('')||'<div class="empty">Evidence je prázdná. Pozemek přidejte ručně nebo načtěte z LPIS.</div>';
+ renderDistanceStatus();
+ document.dispatchEvent(new CustomEvent('vcelar:parcels-updated',{detail:{parcels:db.parcels}}));
+}
 function renderHome(){$('sColonies').textContent=db.colonies.length;$('sChecks').textContent=db.checks.length;$('sParcels').textContent=db.parcels.length;$('sForage').textContent=db.forage.length;const all=[...db.checks.map(x=>({...x,label:'Kontrola · '+(db.colonies.find(c=>c.id===x.colony)?.name||'Včelstvo'),detail:x.type})),...db.forage.map(x=>({...x,label:'Pastva · '+x.plant,detail:x.flow})),...(db.harvests||[]).map(x=>({...x,label:'Medobraní · '+(db.colonies.find(c=>c.id===x.colony)?.name||'Včelstvo'),detail:(x.kg||0)+' kg · '+(x.type||'')}))].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,5);$('recent').innerHTML=all.map(x=>`<div class="item"><div><b>${esc(x.date)} · ${esc(x.label)}</b><div class="muted">${esc(x.detail)}</div></div></div>`).join('')||'<div class="empty">Zatím bez záznamů.</div>'}
 function fillHarvestColonies(){const s=$('harvestColony');if(!s)return;const old=s.value;s.innerHTML=db.colonies.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');if(old)s.value=old}
 function clearHarvest(){['harvestId','harvestKg','harvestFrames','harvestMoisture','harvestSugar','harvestNotes'].forEach(id=>$(id).value='');$('harvestDate').value=today();$('harvestType').value='Květový';$('harvestPhoto').value='';$('harvestPhotoPreview').innerHTML='';$('cancelHarvest').classList.add('hidden');$('saveHarvest').textContent='Uložit medobraní'}
@@ -53,8 +78,51 @@ function ensureDistanceStatus(){
  const box=document.createElement('div');box.id='distanceRepairStatus';box.className='notice';box.style.margin='10px 0 14px';box.style.border='1px solid #d6a43b';box.setAttribute('role','status');heading.insertAdjacentElement('afterend',box);
 }
 function clearColony(){['colId','colName','colType','colDate','colNotes','colStrainOther'].forEach(x=>$(x).value='');$('colState').value='Aktivní';$('colQueenColor').value='';$('colStrain').value='';$('colStrainOtherWrap').classList.add('hidden')}
-function clearParcel(){$('pId').value='';['pCode','pDist','pArea','pCulture','pCrop','pFrom','pTo','pVerified','pNotes'].forEach(x=>$(x).value='');$('pStatus').value='Neznámé';$('pBee').value='Neurčeno';$('deleteParcel').classList.add('hidden');$('parcelHeading').textContent='Karta pozemku'}
-function editParcel(id){const p=db.parcels.find(x=>x.id===id);if(!p)return;clearParcel();$('pId').value=p.id;const fields={code:'pCode',dist:'pDist',area:'pArea',culture:'pCulture',crop:'pCrop',status:'pStatus',from:'pFrom',to:'pTo',bee:'pBee',verified:'pVerified',notes:'pNotes'};Object.entries(fields).forEach(([k,v])=>$(v).value=p[k]??'');$('deleteParcel').classList.remove('hidden');$('parcelHeading').textContent='Upravit pozemek '+(p.code||'')}
+function resetParcelFields(){
+ $('pId').value='';
+ ['pCode','pDist','pArea','pCulture','pCrop','pFrom','pTo','pVerified','pNotes'].forEach(x=>$(x).value='');
+ $('pStatus').value='Neznámé';$('pBee').value='Neurčeno';
+ $('deleteParcel').classList.add('hidden');$('parcelHeading').textContent='Karta pozemku';
+}
+function closeParcelCard(){
+ const form=$('parcelForm');
+ if(form&&parcelFormHome&&form.parentNode!==parcelFormHome){
+  if(parcelFormNext&&parcelFormNext.parentNode===parcelFormHome)parcelFormHome.insertBefore(form,parcelFormNext);
+  else parcelFormHome.appendChild(form);
+ }
+ if(form)form.classList.add('hidden');
+ resetParcelFields();
+}
+function showParcelCard(slot){
+ const form=$('parcelForm');
+ if(!slot)return;
+ slot.appendChild(form);form.classList.remove('hidden');
+ form.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function newParcelCard(){
+ resetParcelFields();
+ let slot=document.getElementById('parcelNewCardSlot');
+ if(!slot){slot=document.createElement('div');slot.id='parcelNewCardSlot';slot.className='parcel-card-slot';$('parcelList').appendChild(slot)}
+ showParcelCard(slot);
+ $('pCode').focus({preventScroll:true});
+}
+function clearParcel(){closeParcelCard()}
+function editParcel(id){
+ const p=db.parcels.find(x=>x.id===id);if(!p)return;
+ resetParcelFields();
+ $('pId').value=p.id;
+ const fields={code:'pCode',area:'pArea',culture:'pCulture',crop:'pCrop',status:'pStatus',from:'pFrom',to:'pTo',bee:'pBee',verified:'pVerified',notes:'pNotes'};
+ Object.entries(fields).forEach(([k,v])=>$(v).value=p[k]??'');
+ const km=storedDistanceKm(p.dist);$('pDist').value=km===null?'':String(Math.round(km*1000*100)/100);
+ $('deleteParcel').classList.remove('hidden');
+ $('parcelHeading').textContent='Upravit pozemek '+(p.code||'');
+ const entry=[...document.querySelectorAll('[data-parcel-entry]')].find(el=>el.dataset.parcelEntry===String(id));
+ if(entry){
+  let slot=entry.querySelector('.parcel-card-slot');
+  if(!slot){slot=document.createElement('div');slot.className='parcel-card-slot';entry.appendChild(slot)}
+  showParcelCard(slot);
+ }
+}
 function wfsStatus(msg,bad=false){$('wfsStatus').className='notice'+(bad?' bad':'');$('wfsStatus').textContent=msg}
 function endpoint(){return $('wfsUrl').value.trim().replace(/\?+$/,'')}
 function geometryCenter(g){const pts=[];const walk=v=>{if(!Array.isArray(v))return;if(v.length>=2&&typeof v[0]==='number'&&typeof v[1]==='number'){pts.push(v);return}v.forEach(walk)};if(g?.type==='GeometryCollection')(g.geometries||[]).forEach(x=>walk(x.coordinates));else walk(g?.coordinates);if(!pts.length)return null;const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);return [(Math.min(...ys)+Math.max(...ys))/2,(Math.min(...xs)+Math.max(...xs))/2]}
@@ -97,9 +165,18 @@ async function init(){
  $('saveHarvest').onclick=async()=>{if(!db.colonies.length){alert('Nejprve přidejte včelstvo.');return}const kg=Number($('harvestKg').value);if(!Number.isFinite(kg)||kg<=0){alert('Zadejte množství medu v kg větší než nula.');return}let photo='';const file=$('harvestPhoto').files[0];if(file){if(!file.type.startsWith('image/')){alert('Vyberte prosím obrázek.');return}try{photo=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const scale=Math.min(1,1200/Math.max(img.width,img.height)),canvas=document.createElement('canvas');canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL('image/jpeg',.76))};img.onerror=reject;img.src=reader.result};reader.onerror=reject;reader.readAsDataURL(file)})}catch(e){alert('Fotografii se nepodařilo načíst.');return}}const id=$('harvestId').value||uid(),old=(db.harvests||[]).find(x=>x.id===id);const rec={id,date:$('harvestDate').value||today(),colony:$('harvestColony').value,type:$('harvestType').value,kg,frames:Number($('harvestFrames').value)||0,moisture:$('harvestMoisture').value,sugar:$('harvestSugar').value,notes:$('harvestNotes').value.trim(),photo:photo||old?.photo||''};if(!Array.isArray(db.harvests))db.harvests=[];const i=db.harvests.findIndex(x=>x.id===id);if(i<0)db.harvests.unshift(rec);else db.harvests[i]=rec;clearHarvest();save()};
  $('cancelHarvest').onclick=clearHarvest;$('harvestYearFilter').onchange=renderHarvest;
  $('harvestList').onclick=e=>{const edit=e.target.closest('[data-edit-harvest]'),del=e.target.closest('[data-del-harvest]');if(edit){const x=db.harvests.find(z=>z.id===edit.dataset.editHarvest);if(!x)return;$('harvestId').value=x.id;$('harvestDate').value=x.date||today();$('harvestColony').value=x.colony;$('harvestType').value=x.type||'Květový';$('harvestKg').value=x.kg??'';$('harvestFrames').value=x.frames??'';$('harvestMoisture').value=x.moisture??'';$('harvestSugar').value=x.sugar??'';$('harvestNotes').value=x.notes||'';$('harvestPhoto').value='';$('harvestPhotoPreview').innerHTML=x.photo?`<img src="${x.photo}" alt="Aktuální fotografie" style="max-width:180px;max-height:130px;border-radius:10px"><div class="muted">Ponechá se, pokud nevyberete novou fotografii.</div>`:'';$('cancelHarvest').classList.remove('hidden');$('saveHarvest').textContent='Uložit změny';$('harvestForm').scrollIntoView({behavior:'smooth',block:'start'})}if(del&&confirm('Opravdu smazat toto medobraní?')){db.harvests=db.harvests.filter(x=>x.id!==del.dataset.delHarvest);save()}};
- $('newParcel').onclick=clearParcel;$('clearParcel').onclick=clearParcel;
- $('saveParcel').onclick=()=>{const p={id:$('pId').value||uid(),code:$('pCode').value.trim(),dist:$('pDist').value,area:$('pArea').value,culture:$('pCulture').value,crop:$('pCrop').value,status:$('pStatus').value,from:$('pFrom').value,to:$('pTo').value,bee:$('pBee').value,verified:$('pVerified').value,notes:$('pNotes').value};if(!p.code&&!p.crop){alert('Vyplňte alespoň LPIS ID nebo plodinu.');return}const i=db.parcels.findIndex(x=>x.id===p.id);if(i<0)db.parcels.push(p);else db.parcels[i]={...db.parcels[i],...p};clearParcel();save()};
- $('deleteParcel').onclick=()=>{const id=$('pId').value;if(id&&confirm('Opravdu smazat pozemek?')){db.parcels=db.parcels.filter(x=>x.id!==id);clearParcel();save()}};
+ parcelFormHome=$('parcelForm').parentNode;parcelFormNext=$('parcelForm').nextSibling;$('parcelForm').classList.add('hidden');
+ $('newParcel').onclick=newParcelCard;$('clearParcel').onclick=clearParcel;
+ $('saveParcel').onclick=()=>{
+  const rawMetres=Number(String($('pDist').value||'').trim().replace(',','.'));
+  const distKm=$('pDist').value.trim()===''?'':(Number.isFinite(rawMetres)&&rawMetres>=0?(rawMetres/1000).toFixed(3):'');
+  const p={id:$('pId').value||uid(),code:$('pCode').value.trim(),dist:distKm,area:$('pArea').value,culture:$('pCulture').value,crop:$('pCrop').value,status:$('pStatus').value,from:$('pFrom').value,to:$('pTo').value,bee:$('pBee').value,verified:$('pVerified').value,notes:$('pNotes').value};
+  if(!p.code&&!p.crop){alert('Vyplňte alespoň LPIS ID nebo plodinu.');return}
+  if($('pDist').value.trim()!==''&&distKm===''){alert('Zadejte platnou vzdálenost v metrech.');return}
+  const i=db.parcels.findIndex(x=>x.id===p.id);if(i<0)db.parcels.push(p);else db.parcels[i]={...db.parcels[i],...p};
+  closeParcelCard();save();
+ };
+ $('deleteParcel').onclick=()=>{const id=$('pId').value;if(id&&confirm('Opravdu smazat pozemek?')){db.parcels=db.parcels.filter(x=>x.id!==id);closeParcelCard();save()}};
  $('parcelSearch').oninput=renderParcels;$('parcelList').onclick=e=>{const b=e.target.closest('[data-edit-parcel]');if(b)editParcel(b.dataset.editParcel)};
  $('openCaps').onclick=()=>window.open(endpoint()+'?service=WFS&request=GetCapabilities','_blank');
  $('getCaps').onclick=async()=>{if(!navigator.onLine){wfsStatus('Jste offline. Pro načtení LPIS se připojte k internetu.',true);return}wfsStatus('Načítám seznam vrstev…');try{const u=new URL(endpoint());u.searchParams.set('service','WFS');u.searchParams.set('request','GetCapabilities');const r=await fetch(u,{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const xml=new DOMParser().parseFromString(await r.text(),'text/xml');if(xml.querySelector('parsererror'))throw Error('Neplatné XML');const names=[...xml.getElementsByTagNameNS('*','FeatureType')].map(n=>({name:n.getElementsByTagNameNS('*','Name')[0]?.textContent,title:n.getElementsByTagNameNS('*','Title')[0]?.textContent})).filter(x=>x.name);$('wfsLayer').innerHTML=names.map(x=>`<option value="${esc(x.name)}">${esc(x.title||x.name)} (${esc(x.name)})</option>`).join('');if(!names.length)throw Error('Služba nevrátila žádné vrstvy');wfsStatus('Spojení navázáno. Dostupných vrstev: '+names.length+'. Vyberte vrstvu.')}catch(e){wfsStatus('LPIS se nepodařilo načíst: '+e.message,true)}};
