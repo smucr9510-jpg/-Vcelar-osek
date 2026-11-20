@@ -1,4 +1,4 @@
-const CACHE='vcelar-osek-v20';
+const CACHE='vcelar-osek-v21';
 const FILES=[
   './',
   './index.html',
