@@ -1,5 +1,5 @@
 /* Včelař – Osek | prognóza pastvy: LPIS + ZABAGED + NDVI + počasí + fenologie
-   Verze: 20 | GPZ deklarace párované výhradně podle ID DPB.
+   Verze: 21 | GPZ deklarace párované výhradně podle ID DPB.
    Odhad pastvy je orientační model, nikoli měření nektaru nebo kg medu. */
 (() => {
   'use strict';
@@ -7,7 +7,7 @@
   const SITE = { lat: 49.7804535, lon: 13.5998565 };
   const GEOJSON = './crops/plodiny_lpis_2026_osek_5km.geojson';
   const ZABAGED = 'https://ags.cuzk.gov.cz/arcgis/rest/services/ZABAGED_POLOHOPIS/MapServer';
-  const CACHE = 'vcelarOsek.forecast.v15';
+  const CACHE = 'vcelarOsek.forecast.v16';
   const CLIMATE_CACHE = 'vcelarOsek.phenologyClimate.v1';
   const CLIMATE_URL = 'https://archive-api.open-meteo.com/v1/archive';
   const DB_NAME = 'vcelarOsekDB', DB_STORE = 'appData', DB_KEY = 'vcelarOsek.data.v2';
@@ -139,7 +139,7 @@
     ];
     for(const value of raw){
       const id=String(value??'').replace(/^lpis:/i,'').trim();
-      if(/^\\d+$/.test(id))return id;
+      if(/^\d+$/.test(id))return id;
     }
     return '';
   }
@@ -147,7 +147,7 @@
     const raw=[d?.dpbId,d?.dpbID,d?.ID_DPB,d?.IdDiluPudnihoBloku,d?.idDiluPudnihoBloku,d?.idDpb];
     for(const value of raw){
       const id=String(value??'').replace(/^lpis:/i,'').trim();
-      if(/^\\d+$/.test(id))return id;
+      if(/^\d+$/.test(id))return id;
     }
     return '';
   }
