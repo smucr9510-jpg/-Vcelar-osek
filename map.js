@@ -15,6 +15,22 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   }[ch]));
 
+  // V datech aplikace je vzdálenost do 50 uložená v kilometrech,
+  // vyšší hodnoty jsou již v metrech. V kartě se vždy zobrazuje m/km.
+  function formatDistance(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return '';
+    if (n <= 50) {
+      const metres = n * 1000;
+      return metres < 1000
+        ? `${Math.round(metres)} m`
+        : `${(metres / 1000).toLocaleString('cs-CZ', { maximumFractionDigits: 2 })} km`;
+    }
+    return n < 1000
+      ? `${Math.round(n)} m`
+      : `${(n / 1000).toLocaleString('cs-CZ', { maximumFractionDigits: 2 })} km`;
+  }
+
   function addStyles() {
     if (document.getElementById('vcelar-home-map-styles')) return;
     const style = document.createElement('style');
@@ -90,7 +106,8 @@
       },
       onEachFeature: (feature, layer) => {
         const p = feature.properties || {};
-        const popup = `<b>${esc(p.code || 'Pozemek LPIS')}</b><br>${esc(p.crop || p.culture || 'Plodina nezjištěna')}<br>${p.area ? esc(p.area) + ' ha' : 'Výměra neuvedena'}<br>${p.dist ? esc(p.dist) + ' km od stanoviště' : ''}<br><button type="button" class="btn" data-open-vcelar-parcel="${esc(p.id)}">Otevřít kartu pozemku</button>`;
+        const distanceText = formatDistance(p.dist);
+        const popup = `<b>${esc(p.code || 'Pozemek LPIS')}</b><br>${esc(p.crop || p.culture || 'Plodina nezjištěna')}<br>${p.area ? esc(p.area) + ' ha' : 'Výměra neuvedena'}<br>${distanceText ? esc(distanceText) + ' od stanoviště' : ''}<br><button type="button" class="btn" data-open-vcelar-parcel="${esc(p.id)}">Otevřít kartu pozemku</button>`;
         layer.bindPopup(popup);
         layer.on('popupopen', event => {
           const button = event.popup.getElement()?.querySelector('[data-open-vcelar-parcel]');
