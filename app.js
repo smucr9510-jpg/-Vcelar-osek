@@ -69,7 +69,9 @@ const resultLabel=value==='nelze_posoudit'?'Nelze posoudit':optionMap[value];
 const disclaimer=normalizeText(data.disclaimer||a.disclaimer)||'Automatické posouzení fotografie je pouze orientační. Výsledek ověřte fyzickou kontrolou plástu.';
 $('checkPhotoAnalysisStatus').innerHTML=`<b>Orientační výsledek: ${esc(resultLabel)}</b><br>Jistota: ${esc(certainty)}<br>${observations.map(esc).join('<br>')}${limits.length?'<br><br>Omezení: '+limits.map(esc).join('; '):''}${recommendation?'<br><br>'+esc(recommendation):''}<br><small>${esc(disclaimer)}</small>`;
 if(value==='nelze_posoudit'&&observations.length===0&&limits.length===0&&!recommendation){
- $('checkPhotoAnalysisStatus').innerHTML+=`<br><small>Server odpověděl, ale neposkytl rozpoznatelná pole výsledku. Pro kontrolu: ${esc(Object.keys(a).join(', ')||'odpověď neobsahuje pole assessment')}.</small>`;
+ const rawLevel=pick('level','mezerovitost','brood_pattern','broodPattern','pattern','brood_gappiness','gappiness','brood_quality');
+ const rawSummary=pick('summary','doporuceni','recommendation','advice','next_steps');
+ $('checkPhotoAnalysisStatus').innerHTML+=`<br><small>Diagnostika serveru: pole ${esc(Object.keys(a).join(', ')||'žádná')}. Hodnota level: ${esc(rawLevel===null?'prázdná':typeof rawLevel==='object'?JSON.stringify(rawLevel):String(rawLevel))}. Summary: ${esc(rawSummary===null?'prázdné':typeof rawSummary==='object'?JSON.stringify(rawSummary):String(rawSummary))}.</small>`;
 }}catch(e){checkPhotoAssessment=null;$('checkPhotoAnalysisStatus').textContent='Analýza se nezdařila: '+(e.message||e)}
  finally{button.disabled=false;button.textContent='Vyhodnotit fotografii'}
 }
