@@ -44,15 +44,33 @@ async function analyzeCheckPhoto(){
   const response=await fetch(BROOD_ANALYSIS_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image})});
   let data;try{data=await response.json()}catch{throw Error('Server nevrátil čitelnou odpověď.')}
   if(!response.ok||!data.ok)throw Error(data.error||('Server odpověděl HTTP '+response.status));
-  const a=data.assessment||{};checkPhotoAssessment=a;
-  const value=String(a.mezerovitost||'nelze_posoudit').toLowerCase();
-  const select=$('checkBroodPattern');
-  const optionMap={'nízká':'Nízká','střední':'Střední','vysoká':'Vysoká'};
-  if(optionMap[value])select.value=optionMap[value];
-  const observations=Array.isArray(a.pozorovani)?a.pozorovani:[];
-  const limits=Array.isArray(a.omezeni)?a.omezeni:[];
-  $('checkPhotoAnalysisStatus').innerHTML=`<b>Orientační výsledek: ${esc(value==='nelze_posoudit'?'Nelze posoudit':optionMap[value]||value)}</b><br>Jistota: ${esc(a.jistota||'nízká')}<br>${observations.map(esc).join('<br>')}${limits.length?'<br><br>Omezení: '+limits.map(esc).join('; '):''}${a.doporuceni?'<br><br>'+esc(a.doporuceni):''}<br><small>${esc(data.disclaimer||'Výsledek ověřte fyzickou kontrolou plástu.')}</small>`;
- }catch(e){checkPhotoAssessment=null;$('checkPhotoAnalysisStatus').textContent='Analýza se nezdařila: '+(e.message||e)}
+  const root=data.assessment??data.result??data.analysis??data;
+const a=(root&&typeof root==='object'&&!Array.isArray(root))?root:{};
+const pick=(...keys)=>{for(const key of keys){const v=a[key];if(v!==undefined&&v!==null&&v!=='')return v}return null};
+const normalizeText=v=>String(v??'').trim();
+const normalizePattern=v=>{
+ const s=normalizeText(v).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+ if(['nizka','low','good','regular','normal','minimalni','minimal'].includes(s))return 'nízká';
+ if(['stredni','medium','moderate','average'].includes(s))return 'střední';
+ if(['vysoka','high','poor','irregular','spatna','severe'].includes(s))return 'vysoká';
+ return 'nelze_posoudit';
+};
+const value=normalizePattern(pick('mezerovitost','brood_pattern','broodPattern','pattern','brood_gappiness','gappiness','brood_quality'));
+const certainty=normalizeText(pick('jistota','confidence','certainty','confidence_level'))||'neuvedena';
+const toArray=v=>Array.isArray(v)?v.map(x=>typeof x==='string'?x:JSON.stringify(x)):typeof v==='string'&&v.trim()?[v]:[];
+const observations=toArray(pick('pozorovani','observations','findings','visible_signs'));
+const limits=toArray(pick('omezeni','limitations','uncertainties','caveats'));
+const recommendation=normalizeText(pick('doporuceni','recommendation','advice','next_steps'));
+const optionMap={'nízká':'Nízká','střední':'Střední','vysoká':'Vysoká'};
+checkPhotoAssessment={mezerovitost:value,jistota:certainty,pozorovani:observations,omezeni:limits,doporuceni:recommendation,raw:a};
+const select=$('checkBroodPattern');
+if(optionMap[value])select.value=optionMap[value];
+const resultLabel=value==='nelze_posoudit'?'Nelze posoudit':optionMap[value];
+const disclaimer=normalizeText(data.disclaimer||a.disclaimer)||'Automatické posouzení fotografie je pouze orientační. Výsledek ověřte fyzickou kontrolou plástu.';
+$('checkPhotoAnalysisStatus').innerHTML=`<b>Orientační výsledek: ${esc(resultLabel)}</b><br>Jistota: ${esc(certainty)}<br>${observations.map(esc).join('<br>')}${limits.length?'<br><br>Omezení: '+limits.map(esc).join('; '):''}${recommendation?'<br><br>'+esc(recommendation):''}<br><small>${esc(disclaimer)}</small>`;
+if(value==='nelze_posoudit'&&observations.length===0&&limits.length===0&&!recommendation){
+ $('checkPhotoAnalysisStatus').innerHTML+=`<br><small>Server odpověděl, ale neposkytl rozpoznatelná pole výsledku. Pro kontrolu: ${esc(Object.keys(a).join(', ')||'odpověď neobsahuje pole assessment')}.</small>`;
+}}catch(e){checkPhotoAssessment=null;$('checkPhotoAnalysisStatus').textContent='Analýza se nezdařila: '+(e.message||e)}
  finally{button.disabled=false;button.textContent='Vyhodnotit fotografii'}
 }
 function renderColonies(){$('colonyList').innerHTML=db.colonies.map(c=>`<div class="item"><div><b>${esc(c.name)}</b><div class="muted">${esc(c.type||'Typ neuveden')} · ${esc(c.state)}</div><div class="small">Matka: ${esc(c.queenColor||'barva neuvedena')} · Kmen: ${esc(c.strain==='Jiný / vlastní'?(c.strainOther||'vlastní'):c.strain||'neuveden')}</div><div class="small">${esc(c.notes)}</div></div><button class="btn" type="button" data-edit-col="${esc(c.id)}">Upravit</button></div>`).join('')||'<div class="empty">Zatím žádná včelstva.</div>';fillColonySelect()}
@@ -160,7 +178,7 @@ function fillMissingParcelDistances(){
  for(const parcel of db.parcels){if(!parcel||String(parcel.dist??'').trim()!=='')continue;if(!parcel.geometry){withoutGeometry++;continue}
   const center=geometryCenter(parcel.geometry);
   if(!center||!Number.isFinite(center[0])||!Number.isFinite(center[1])||Math.abs(center[0])>90||Math.abs(center[1])>180){invalidGeometry++;continue}
-  const km=distance(SITE.lat,SITE.lon,center[0],center[1]);if(!Number.isFinite(km)){invalidGeometry++;continue}parcel.dist=km.toFixed(2);updated++;
+  const km=distance(SITE.lat,SITE.lon,center[0],center[1]);if(!Number.isFinite(km)){invalidGeometry++;continue}parcel.dist=km.toFixed(2);updated++
  }
  return {updated,withoutGeometry,invalidGeometry};
 }
