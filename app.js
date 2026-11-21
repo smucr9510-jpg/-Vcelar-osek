@@ -50,17 +50,17 @@ const pick=(...keys)=>{for(const key of keys){const v=a[key];if(v!==undefined&&v
 const normalizeText=v=>String(v??'').trim();
 const normalizePattern=v=>{
  const s=normalizeText(v).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
- if(['nizka','low','good','regular','normal','minimalni','minimal'].includes(s))return 'nízká';
- if(['stredni','medium','moderate','average'].includes(s))return 'střední';
- if(['vysoka','high','poor','irregular','spatna','severe'].includes(s))return 'vysoká';
+ if(['nizka','low','good','regular','normal','minimalni','minimal','excellent','very good'].includes(s))return 'nízká';
+ if(['stredni','medium','moderate','average','fair'].includes(s))return 'střední';
+ if(['vysoka','high','poor','irregular','spatna','severe','bad','very poor'].includes(s))return 'vysoká';
  return 'nelze_posoudit';
 };
-const value=normalizePattern(pick('mezerovitost','brood_pattern','broodPattern','pattern','brood_gappiness','gappiness','brood_quality'));
+const value=normalizePattern(pick('mezerovitost','level','brood_pattern','broodPattern','pattern','brood_gappiness','gappiness','brood_quality'));
 const certainty=normalizeText(pick('jistota','confidence','certainty','confidence_level'))||'neuvedena';
 const toArray=v=>Array.isArray(v)?v.map(x=>typeof x==='string'?x:JSON.stringify(x)):typeof v==='string'&&v.trim()?[v]:[];
 const observations=toArray(pick('pozorovani','observations','findings','visible_signs'));
 const limits=toArray(pick('omezeni','limitations','uncertainties','caveats'));
-const recommendation=normalizeText(pick('doporuceni','recommendation','advice','next_steps'));
+const recommendation=normalizeText(pick('doporuceni','recommendation','advice','next_steps','summary'));
 const optionMap={'nízká':'Nízká','střední':'Střední','vysoká':'Vysoká'};
 checkPhotoAssessment={mezerovitost:value,jistota:certainty,pozorovani:observations,omezeni:limits,doporuceni:recommendation,raw:a};
 const select=$('checkBroodPattern');
