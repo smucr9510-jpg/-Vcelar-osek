@@ -41,8 +41,19 @@ async function analyzeCheckPhoto(){
  if(!navigator.onLine){$('checkPhotoAnalysisStatus').textContent='Analýza vyžaduje připojení k internetu. Fotografie zůstává v telefonu.';return}
  const button=$('analyzeCheckPhoto');button.disabled=true;button.textContent='Vyhodnocuji…';$('checkPhotoAnalysisStatus').textContent='Odesílám zmenšenou fotografii k orientačnímu posouzení…';
  try{
-  const image=await readCheckPhoto(file);
-  const response=await fetch(BROOD_ANALYSIS_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image})});
+  let image=await readCheckPhoto(file);
+  // OPRAVA v6: online AI dostane jen OŘÍZNUTÝ plod, ne celý rámek se včelami a zásobami
+  if(broodLastImage && broodArea){
+    try{
+      const cc=document.createElement('canvas'); const insetX=broodArea.w*0.04, insetY=broodArea.h*0.04;
+      const sx=Math.round(broodArea.x+insetX), sy=Math.round(broodArea.y+insetY), sw=Math.round(broodArea.w-2*insetX), sh=Math.round(broodArea.h-2*insetY);
+      cc.width=Math.max(1,sw); cc.height=Math.max(1,sh);
+      cc.getContext('2d').drawImage(broodLastImage, sx, sy, sw, sh, 0, 0, cc.width, cc.height);
+      image=cc.toDataURL('image/jpeg',0.82);
+      $('checkPhotoAnalysisStatus').textContent='Odesílám jen oříznutou plodovou plochu (bez okrajů se zásobami)...';
+    }catch(e){ /* když ořez selže, pošle se celá fotka */ }
+  }
+  const response=await fetch(BROOD_ANALYSIS_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image, instruction:'Vyhodnoť POUZE mezerovitost zavíčkovaného plodu na této fotce. Ignoruj včely na plástu - nejsou to mezery. Ignoruj zásoby / medné okraje - nejsou to plod. Vrať i číselné procento mezerovitosti (0-100).', want_percent:true, brood_area: broodArea||null, ignore_bees:true, ignore_stores:true})});
   let data;try{data=await response.json()}catch{throw Error('Server nevrátil čitelnou odpověď.')}
   if(!response.ok||!data.ok)throw Error(data.error||('Server odpověděl HTTP '+response.status));
   const root=data.assessment??data.result??data.analysis??data;
@@ -63,7 +74,10 @@ const observations=toArray(pick('pozorovani','observations','findings','visible_
 const limits=toArray(pick('omezeni','limitations','uncertainties','caveats'));
 const recommendation=normalizeText(pick('doporuceni','recommendation','advice','next_steps','summary'));
 const optionMap={'nízká':'Nízká','střední':'Střední','vysoká':'Vysoká'};
-checkPhotoAssessment={mezerovitost:value,jistota:certainty,pozorovani:observations,omezeni:limits,doporuceni:recommendation,raw:a};
+const pctRaw=pick('mezerovitost_pct','mezerovitost_procenta','percent','percentage','gappiness_pct','brood_gappiness_pct');
+const pctNum=pctRaw!==null&&pctRaw!==''?Number(String(pctRaw).replace(',','.').replace('%','')):NaN;
+checkPhotoAssessment={mezerovitost:value,jistota:certainty,pozorovani:observations,omezeni:limits,doporuceni:recommendation,raw:a,zdroj:'online-AI (oříznutý plod)'};
+if(Number.isFinite(pctNum)&&pctNum>=0&&pctNum<=100){ checkPhotoAssessment.mezerovitost_pct=Math.round(pctNum*10)/10; if($('checkBroodPercent')) $('checkBroodPercent').value=checkPhotoAssessment.mezerovitost_pct; }
 const select=$('checkBroodPattern');
 if(optionMap[value])select.value=optionMap[value];
 const resultLabel=value==='nelze_posoudit'?'Nelze posoudit':optionMap[value];
